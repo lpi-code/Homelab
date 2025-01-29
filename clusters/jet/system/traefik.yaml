@@ -33,18 +33,3 @@ spec:
     ingressRoute:
       dashboard:
         enabled: true
-    ports:
-      web:
-        expose: true
-      websecure:
-        expose: true
-    providers:
-      kubernetesCRD:
-        enabled: true
-      kubernetesIngress:
-        enabled: true
-    tls:
-      stores:
-        default:
-          defaultCertificate:
-            secretName: traefik-tls
