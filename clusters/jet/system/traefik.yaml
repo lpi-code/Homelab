@@ -24,7 +24,6 @@ spec:
   chart:
     spec:
       chart: traefik
-      version: "latest"  # Replace with a specific version if needed
       sourceRef:
         kind: HelmRepository
         name: traefik
