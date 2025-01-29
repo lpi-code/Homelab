@@ -34,10 +34,11 @@ spec:
       dashboard:
         enabled: true
         matchRule: Host(`n8n.piernas.fr`)
-        entryPoints: ["web"]
+        entryPoints: ["websecure"]
         middlewares:
           - name: traefik-dashboard-auth
     additionalArguments:
+      - "--entrypoints.websecure.address=:443"
       - "--entrypoints.websecure.http.tls.certresolver=default"
       - "--certificatesresolvers.default.acme.tlschallenge=true"
       - "--certificatesresolvers.default.acme.email=your-email@example.com"
@@ -59,8 +60,6 @@ spec:
         name: traefik-cert
         readOnly: true
 
-    # Create the custom middlewares used by the IngressRoute dashboard (can also be created in another way).
-    # /!\ Yes, you need to replace "changeme" password with a better one. /!\
     extraObjects:
       - apiVersion: v1
         kind: Secret

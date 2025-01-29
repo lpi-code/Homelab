@@ -44,6 +44,9 @@ spec:
         - name: creds
           mountPath: /etc/cloudflared/creds
           readOnly: true
+        - name: ca-cert
+          mountPath: /etc/ssl/certs
+          readOnly: true
       volumes:
       - name: creds
         secret:
@@ -61,6 +64,9 @@ spec:
           items:
           - key: config.yaml
             path: config.yaml
+      - name: ca-cert
+        secret:
+          secretName: ca-cert
 ---
 # This ConfigMap is just a way to define the cloudflared config.yaml file in k8s.
 # It's useful to define it in k8s, rather than as a stand-alone .yaml file, because
@@ -91,4 +97,6 @@ data:
     # E.g. `cloudflared tunnel route dns example-tunnel tunnel.example.com`.
     ingress:
     # The first rule proxies traffic to the httpbin sample Service defined in app.yaml
-    - service: http://traefik.traefik.svc.cluster.local
+    - service: https://traefik.traefik.svc.cluster.local
+      originRequest:
+        caPool: /etc/ssl/certs/ca.crt
