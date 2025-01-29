@@ -33,12 +33,31 @@ spec:
     ingressRoute:
       dashboard:
         enabled: true
-        # Custom match rule with host domain
         matchRule: Host(`n8n.piernas.fr`)
         entryPoints: ["websecure"]
-        # Add custom middlewares : authentication and redirection
         middlewares:
           - name: traefik-dashboard-auth
+    additionalArguments:
+      - "--entrypoints.websecure.http.tls.certresolver=default"
+      - "--certificatesresolvers.default.acme.tlschallenge=true"
+      - "--certificatesresolvers.default.acme.email=your-email@example.com"
+      - "--certificatesresolvers.default.acme.storage=/data/acme.json"
+    certificatesResolvers:
+      default:
+        acme:
+          email: your-email@example.com
+          storage: /data/acme.json
+          tlsChallenge: {}
+          domains:
+            - main: "traefik.traefik.svc.cluster.local"
+    volumes:
+      - name: traefik-cert
+        secret:
+          secretName: traefik-cert
+    volumeMounts:
+      - mountPath: "/certs"
+        name: traefik-cert
+        readOnly: true
 
     # Create the custom middlewares used by the IngressRoute dashboard (can also be created in another way).
     # /!\ Yes, you need to replace "changeme" password with a better one. /!\
