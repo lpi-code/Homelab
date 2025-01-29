@@ -34,7 +34,7 @@ spec:
       dashboard:
         enabled: true
         matchRule: Host(`n8n.piernas.fr`)
-        entryPoints: ["websecure"]
+        entryPoints: ["web"]
         middlewares:
           - name: traefik-dashboard-auth
     additionalArguments:

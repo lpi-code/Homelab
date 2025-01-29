@@ -91,4 +91,4 @@ data:
     # E.g. `cloudflared tunnel route dns example-tunnel tunnel.example.com`.
     ingress:
     # The first rule proxies traffic to the httpbin sample Service defined in app.yaml
-    - service: https://traefik.traefik.svc.cluster.local
+    - service: http://traefik.traefik.svc.cluster.local
