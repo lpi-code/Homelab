@@ -47,6 +47,7 @@ spec:
         kind: Secret
         metadata:
           name: traefik-dashboard-auth-secret
+          namespace: traefik
         type: kubernetes.io/basic-auth
         stringData:
           username: admin
@@ -56,6 +57,7 @@ spec:
         kind: Middleware
         metadata:
           name: traefik-dashboard-auth
+          namespace: traefik
         spec:
           basicAuth:
             secret: traefik-dashboard-auth-secret
