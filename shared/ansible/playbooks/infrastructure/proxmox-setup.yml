@@ -1,0 +1,198 @@
+---
+# Proxmox Infrastructure Setup Playbook
+# This playbook sets up Proxmox VE infrastructure components
+
+- name: "Proxmox Infrastructure Setup"
+  hosts: "{{ target_environment }}_pve"
+  become: true
+  gather_facts: true
+  
+  vars:
+    proxmox_version: "8.0"
+    zfs_enabled: true
+    backup_enabled: "{{ backup_enabled | default(true) }}"
+    monitoring_enabled: "{{ monitoring_enabled | default(true) }}"
+  
+  pre_tasks:
+    - name: "Validate Proxmox node connectivity"
+      ping:
+      register: ping_result
+      until: ping_result is succeeded
+      retries: 5
+      delay: 10
+    
+    - name: "Check Proxmox version"
+      command: pveversion
+      register: pve_version_result
+      changed_when: false
+      failed_when: false
+    
+    - name: "Display Proxmox version"
+      debug:
+        msg: "Proxmox version: {{ pve_version_result.stdout }}"
+  
+  tasks:
+    - name: "Update Proxmox system packages"
+      apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+      when: update_packages | default(true)
+    
+    - name: "Install additional packages"
+      package:
+        name:
+          - htop
+          - vim
+          - curl
+          - wget
+          - git
+          - jq
+          - tree
+        state: present
+    
+    - name: "Configure ZFS storage pool"
+      blockinfile:
+        path: /etc/modprobe.d/zfs.conf
+        create: yes
+        block: |
+          options zfs zfs_arc_max={{ zfs_arc_max | default(1073741824) }}
+          options zfs zfs_arc_min={{ zfs_arc_min | default(268435456) }}
+      when: zfs_enabled
+    
+    - name: "Configure Proxmox storage"
+      lineinfile:
+        path: /etc/pve/storage.cfg
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "dir: local"
+        - "    path /var/lib/vz"
+        - "    content vztmpl,iso,backup"
+        - "    maxfiles 0"
+        - "    shared 0"
+      when: configure_storage | default(true)
+    
+    - name: "Create VM template directory"
+      file:
+        path: /var/lib/vz/template/iso
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: "Download Talos ISO template"
+      get_url:
+        url: "{{ talos_iso_url | default('https://github.com/siderolabs/talos/releases/download/v1.7.0/metal-amd64.iso') }}"
+        dest: /var/lib/vz/template/iso/talos-v1.7.0.iso
+        mode: '0644'
+      when: download_talos_iso | default(true)
+    
+    - name: "Configure Proxmox backup settings"
+      blockinfile:
+        path: /etc/pve/datacenter.cfg
+        create: yes
+        block: |
+          backup-retention: 30
+          backup-max-files: 7
+          backup-max-files-restore: 14
+      when: backup_enabled
+    
+    - name: "Enable Proxmox backup service"
+      systemd:
+        name: pve-backup-proxy
+        enabled: yes
+        state: started
+      when: backup_enabled
+    
+    - name: "Configure monitoring"
+      blockinfile:
+        path: /etc/pve/datacenter.cfg
+        create: yes
+        block: |
+          bandwidth: 0
+          migration: secure
+          console: vnc
+          keyboard: en-us
+      when: monitoring_enabled
+    
+    - name: "Configure network settings"
+      template:
+        src: proxmox-network.j2
+        dest: /etc/network/interfaces
+        backup: yes
+      notify: restart networking
+    
+    - name: "Configure firewall rules"
+      blockinfile:
+        path: /etc/pve/firewall/cluster.fw
+        create: yes
+        block: |
+          [OPTIONS]
+          
+          [group proxmox]
+          SSH
+          PROXMOX
+          
+          [group vm]
+          SSH
+          
+          [rules]
+          IN ACCEPT -p tcp -dport 8006 -log nolog
+          IN ACCEPT -p tcp -dport 5900:5999 -log nolog
+          IN ACCEPT -p tcp -dport 3128 -log nolog
+      when: configure_firewall | default(true)
+    
+    - name: "Enable Proxmox firewall"
+      command: pve-firewall start
+      when: configure_firewall | default(true)
+    
+    - name: "Create backup script"
+      template:
+        src: backup-proxmox.sh.j2
+        dest: /usr/local/bin/backup-proxmox.sh
+        mode: '0755'
+      when: backup_enabled
+    
+    - name: "Setup backup cron job"
+      cron:
+        name: "Proxmox backup"
+        job: "/usr/local/bin/backup-proxmox.sh"
+        minute: "0"
+        hour: "2"
+        user: root
+      when: backup_enabled
+  
+  handlers:
+    - name: restart networking
+      systemd:
+        name: networking
+        state: restarted
+    
+    - name: restart proxmox services
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - pveproxy
+        - pvedaemon
+        - pvestatd
+  
+  post_tasks:
+    - name: "Verify Proxmox services"
+      systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - pveproxy
+        - pvedaemon
+        - pvestatd
+        - pve-cluster
+    
+    - name: "Display Proxmox setup completion"
+      debug:
+        msg: |
+          Proxmox setup completed successfully!
+          Web interface: https://{{ ansible_host }}:8006
+          Node: {{ inventory_hostname }}
+          Environment: {{ environment }}

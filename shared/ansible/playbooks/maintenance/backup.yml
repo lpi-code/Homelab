@@ -1,0 +1,201 @@
+---
+# Infrastructure Backup Playbook
+# This playbook performs comprehensive backups of the homelab infrastructure
+
+- name: "Infrastructure Backup"
+  hosts: "{{ target_environment }}_pve:{{ target_environment }}_k8s:{{ target_environment }}_services"
+  become: true
+  gather_facts: true
+  
+  vars:
+    backup_root: "/backup"
+    backup_retention_days: "{{ backup_retention_days | default(30) }}"
+    backup_compression: "{{ backup_compression | default('gzip') }}"
+    backup_encryption: "{{ backup_encryption | default(false) }}"
+    backup_schedule: "{{ backup_schedule | default('daily') }}"
+    
+  pre_tasks:
+    - name: "Create backup directory"
+      file:
+        path: "{{ backup_root }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: "Check available disk space"
+      command: df -h {{ backup_root }}
+      register: disk_space
+      changed_when: false
+    
+    - name: "Display available disk space"
+      debug:
+        msg: "Available disk space: {{ disk_space.stdout_lines[1] }}"
+    
+    - name: "Set backup timestamp"
+      set_fact:
+        backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    
+    - name: "Create environment backup directory"
+      file:
+        path: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}"
+        state: directory
+        mode: '0755'
+    
+  tasks:
+    - name: "Backup Proxmox configuration"
+      block:
+        - name: "Backup Proxmox configuration files"
+          archive:
+            path:
+              - /etc/pve
+              - /etc/pve-backup
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/proxmox-config-{{ inventory_hostname }}.tar.gz"
+            format: gz
+        
+        - name: "Backup Proxmox storage configuration"
+          copy:
+            src: /etc/pve/storage.cfg
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/storage-{{ inventory_hostname }}.cfg"
+            remote_src: yes
+        
+        - name: "Backup Proxmox network configuration"
+          copy:
+            src: /etc/network/interfaces
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/interfaces-{{ inventory_hostname }}"
+            remote_src: yes
+        
+        - name: "Export Proxmox VM configurations"
+          command: >
+            pvesh get /cluster/resources
+            --output-format json
+            --output-file {{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/proxmox-resources-{{ inventory_hostname }}.json
+          changed_when: false
+        
+        - name: "Backup Proxmox logs"
+          archive:
+            path:
+              - /var/log/pve
+              - /var/log/daemon.log
+              - /var/log/syslog
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/proxmox-logs-{{ inventory_hostname }}.tar.gz"
+            format: gz
+          ignore_errors: true
+      
+      when: cluster_role == "pve"
+    
+    - name: "Backup Kubernetes cluster"
+      block:
+        - name: "Backup Kubernetes manifests"
+          archive:
+            path:
+              - /etc/kubernetes
+              - /var/lib/kubelet
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/k8s-manifests-{{ inventory_hostname }}.tar.gz"
+            format: gz
+          ignore_errors: true
+        
+        - name: "Backup Talos configuration"
+          archive:
+            path: /etc/talos
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/talos-config-{{ inventory_hostname }}.tar.gz"
+            format: gz
+          ignore_errors: true
+        
+        - name: "Backup Kubernetes logs"
+          archive:
+            path:
+              - /var/log/pods
+              - /var/log/containers
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/k8s-logs-{{ inventory_hostname }}.tar.gz"
+            format: gz
+          ignore_errors: true
+      
+      when: cluster_role in ["control-plane", "worker"]
+    
+    - name: "Backup application data"
+      block:
+        - name: "Backup GitLab data"
+          archive:
+            path:
+              - /var/opt/gitlab
+              - /etc/gitlab
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/gitlab-data-{{ inventory_hostname }}.tar.gz"
+            format: gz
+          when: service_type == "gitlab"
+          ignore_errors: true
+        
+        - name: "Backup monitoring data"
+          archive:
+            path:
+              - /var/lib/prometheus
+              - /var/lib/grafana
+              - /etc/prometheus
+              - /etc/grafana
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/monitoring-data-{{ inventory_hostname }}.tar.gz"
+            format: gz
+          when: service_type == "monitoring"
+          ignore_errors: true
+        
+        - name: "Backup backup server data"
+          archive:
+            path:
+              - /backup
+              - /etc/backup
+            dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/backup-data-{{ inventory_hostname }}.tar.gz"
+            format: gz
+          when: service_type == "backup"
+          ignore_errors: true
+      
+      when: cluster_role == "service"
+    
+    - name: "Create backup metadata"
+      template:
+        src: backup-metadata.j2
+        dest: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}/backup-metadata-{{ inventory_hostname }}.yaml"
+        mode: '0644'
+    
+    - name: "Calculate backup size"
+      stat:
+        path: "{{ backup_root }}/{{ environment }}/{{ backup_timestamp }}"
+      register: backup_stats
+    
+    - name: "Display backup information"
+      debug:
+        msg: |
+          Backup completed successfully!
+          Host: {{ inventory_hostname }}
+          Environment: {{ environment }}
+          Backup size: {{ (backup_stats.stat.size / 1024 / 1024) | round(2) }} MB
+          Backup location: {{ backup_root }}/{{ environment }}/{{ backup_timestamp }}
+  
+  post_tasks:
+    - name: "Clean up old backups"
+      find:
+        paths: "{{ backup_root }}/{{ environment }}"
+        patterns: "*"
+        age: "{{ backup_retention_days }}d"
+        file_type: directory
+      register: old_backups
+    
+    - name: "Remove old backup directories"
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
+      when: old_backups.files | length > 0
+    
+    - name: "Create backup summary"
+      template:
+        src: backup-summary.j2
+        dest: "{{ backup_root }}/{{ environment }}/backup-summary-{{ backup_timestamp }}.txt"
+        mode: '0644'
+      run_once: true
+    
+    - name: "Send backup notification"
+      debug:
+        msg: |
+          Backup process completed for {{ environment }} environment
+          Total hosts backed up: {{ play_hosts | length }}
+          Backup timestamp: {{ backup_timestamp }}
+          Retention: {{ backup_retention_days }} days

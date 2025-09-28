@@ -1,0 +1,21 @@
+# Homelab Infrastructure Requirements
+# Python dependencies for dynamic inventory and Terraform integration
+
+# Core dependencies
+PyYAML>=6.0
+ansible>=5.0.0
+ansible-core>=2.12.0
+
+# Terraform integration
+hcl2>=0.3.0
+
+# Additional utilities
+requests>=2.28.0
+jinja2>=3.1.0
+netaddr>=0.8.0
+
+# Development dependencies (optional)
+pytest>=7.0.0
+pytest-ansible>=3.0.0
+black>=22.0.0
+flake8>=5.0.0

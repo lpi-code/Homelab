@@ -1,0 +1,148 @@
+---
+# Talos Kubernetes Cluster Bootstrap Playbook
+# This playbook bootstraps a Talos Linux Kubernetes cluster
+
+- name: "Talos Kubernetes Cluster Bootstrap"
+  hosts: "{{ target_environment }}_k8s_control"
+  become: true
+  gather_facts: false
+  
+  vars:
+    talos_version: "1.7.0"
+    kubernetes_version: "1.28"
+    cluster_name: "{{ cluster_name | default(target_environment + '-cluster') }}"
+    cluster_endpoint: "{{ cluster_endpoint | default('https://' + groups[target_environment + '_k8s_control'][0] + ':6443') }}"
+    
+  pre_tasks:
+    - name: "Check if Talos CLI is installed"
+      command: talosctl version
+      register: talos_cli_check
+      failed_when: false
+      changed_when: false
+    
+    - name: "Install Talos CLI"
+      block:
+        - name: "Download Talos CLI"
+          get_url:
+            url: "https://github.com/siderolabs/talos/releases/download/v{{ talos_version }}/talosctl-linux-amd64"
+            dest: /usr/local/bin/talosctl
+            mode: '0755'
+        
+        - name: "Verify Talos CLI installation"
+          command: talosctl version
+          register: talos_version_result
+        
+        - name: "Display Talos CLI version"
+          debug:
+            msg: "Talos CLI version: {{ talos_version_result.stdout_lines[0] }}"
+      when: talos_cli_check.rc != 0
+    
+    - name: "Create Talos configuration directory"
+      file:
+        path: /etc/talos
+        state: directory
+        mode: '0755'
+    
+    - name: "Generate Talos configuration"
+      command: >
+        talosctl gen config {{ cluster_name }}
+        --output-dir /etc/talos
+        --config-patch='[{"op": "replace", "path": "/machine/install/disk", "value": "/dev/sda"}]'
+        --config-patch='[{"op": "replace", "path": "/cluster/clusterName", "value": "{{ cluster_name }}"}]'
+        --config-patch='[{"op": "replace", "path": "/cluster/controlPlane/endpoint", "value": "{{ cluster_endpoint }}"}]'
+        --config-patch='[{"op": "replace", "path": "/cluster/network/cni/name", "value": "{{ cni_name | default('cilium') }}"}]'
+        --config-patch='[{"op": "replace", "path": "/cluster/network/podSubnet", "value": "{{ pod_cidr | default('10.244.0.0/16') }}"}]'
+        --config-patch='[{"op": "replace", "path": "/cluster/network/serviceSubnet", "value": "{{ service_cidr | default('10.96.0.0/12') }}"}]'
+      delegate_to: localhost
+      run_once: true
+    
+    - name: "Copy Talos configuration files"
+      copy:
+        src: "/etc/talos/"
+        dest: "/etc/talos/"
+        mode: '0644'
+      delegate_to: localhost
+    
+  tasks:
+    - name: "Wait for Talos nodes to be ready"
+      wait_for:
+        port: 50000
+        host: "{{ ansible_host }}"
+        timeout: 300
+        delay: 10
+    
+    - name: "Apply Talos configuration to control plane nodes"
+      command: >
+        talosctl apply-config
+        --insecure
+        --nodes {{ ansible_host }}
+        /etc/talos/controlplane.yaml
+      delegate_to: localhost
+    
+    - name: "Wait for control plane to be ready"
+      wait_for:
+        port: 6443
+        host: "{{ ansible_host }}"
+        timeout: 600
+        delay: 30
+    
+    - name: "Bootstrap the cluster (first control plane node only)"
+      command: >
+        talosctl bootstrap
+        --nodes {{ ansible_host }}
+      delegate_to: localhost
+      when: inventory_hostname == groups[target_environment + '_k8s_control'][0]
+    
+    - name: "Wait for cluster to be ready"
+      command: >
+        talosctl kubeconfig
+        /etc/talos/kubeconfig
+      delegate_to: localhost
+      when: inventory_hostname == groups[target_environment + '_k8s_control'][0]
+      register: kubeconfig_result
+      retries: 10
+      delay: 30
+    
+    - name: "Set KUBECONFIG environment variable"
+      set_fact:
+        kubeconfig_path: /etc/talos/kubeconfig
+      when: inventory_hostname == groups[target_environment + '_k8s_control'][0]
+    
+    - name: "Verify cluster is ready"
+      command: >
+        kubectl get nodes
+        --kubeconfig {{ kubeconfig_path }}
+      delegate_to: localhost
+      when: inventory_hostname == groups[target_environment + '_k8s_control'][0]
+      register: nodes_result
+    
+    - name: "Display cluster nodes"
+      debug:
+        msg: "{{ nodes_result.stdout_lines }}"
+      when: inventory_hostname == groups[target_environment + '_k8s_control'][0]
+  
+  post_tasks:
+    - name: "Configure Talos cluster access"
+      blockinfile:
+        path: /etc/profile.d/talos.sh
+        create: yes
+        block: |
+          export KUBECONFIG=/etc/talos/kubeconfig
+          export TALOSCONFIG=/etc/talos/talosconfig
+      when: inventory_hostname == groups[target_environment + '_k8s_control'][0]
+    
+    - name: "Create cluster information file"
+      template:
+        src: cluster-info.j2
+        dest: /etc/talos/cluster-info.yaml
+        mode: '0644'
+      when: inventory_hostname == groups[target_environment + '_k8s_control'][0]
+    
+    - name: "Display cluster bootstrap completion"
+      debug:
+        msg: |
+          Talos cluster bootstrap completed successfully!
+          Cluster name: {{ cluster_name }}
+          Control plane nodes: {{ groups[target_environment + '_k8s_control'] | length }}
+          Worker nodes: {{ groups[target_environment + '_k8s_workers'] | length }}
+          Kubeconfig: /etc/talos/kubeconfig
