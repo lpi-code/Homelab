@@ -1,0 +1,177 @@
+---
+# Development Environment Inventory
+# This file defines all hosts and groups for the development environment
+
+all:
+  children:
+    dev:
+      children:
+        # Proxmox VE hosts
+        dev_pve:
+          hosts:
+            pve02-dev:
+              ansible_host: 192.168.1.102
+              ansible_user: root
+              environment: dev
+              cluster_role: pve
+              datacenter: dev-dc
+              terraform_vars:
+                proxmox_node: "pve02"
+                storage_pool: "local-zfs"
+                cluster_name: "dev-cluster"
+                vm_id_start: 100
+                vm_memory: 4096
+                vm_cores: 2
+                vm_disk_size: "32G"
+                vm_network: "vmbr0"
+                vm_template: "talos-v1.7.0"
+                vm_tags: "dev,homelab"
+        
+        # Kubernetes cluster hosts
+        dev_k8s:
+          children:
+            dev_k8s_control:
+              hosts:
+                dev-k8s-cp-01:
+                  ansible_host: 192.168.1.110
+                  ansible_user: root
+                  environment: dev
+                  cluster_role: control-plane
+                  cluster_name: dev-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 110
+                    vm_memory: 4096
+                    vm_cores: 2
+                    vm_disk_size: "20G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "dev,k8s,control-plane"
+                    talos_config_type: "controlplane"
+                
+                dev-k8s-cp-02:
+                  ansible_host: 192.168.1.111
+                  ansible_user: root
+                  environment: dev
+                  cluster_role: control-plane
+                  cluster_name: dev-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 111
+                    vm_memory: 4096
+                    vm_cores: 2
+                    vm_disk_size: "20G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "dev,k8s,control-plane"
+                    talos_config_type: "controlplane"
+            
+            dev_k8s_workers:
+              hosts:
+                dev-k8s-worker-01:
+                  ansible_host: 192.168.1.120
+                  ansible_user: root
+                  environment: dev
+                  cluster_role: worker
+                  cluster_name: dev-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 120
+                    vm_memory: 8192
+                    vm_cores: 4
+                    vm_disk_size: "50G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "dev,k8s,worker"
+                    talos_config_type: "worker"
+                
+                dev-k8s-worker-02:
+                  ansible_host: 192.168.1.121
+                  ansible_user: root
+                  environment: dev
+                  cluster_role: worker
+                  cluster_name: dev-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 121
+                    vm_memory: 8192
+                    vm_cores: 4
+                    vm_disk_size: "50G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "dev,k8s,worker"
+                    talos_config_type: "worker"
+        
+        # Development services
+        dev_services:
+          hosts:
+            dev-gitlab:
+              ansible_host: 192.168.1.130
+              ansible_user: root
+              environment: dev
+              cluster_role: service
+              service_type: gitlab
+              terraform_vars:
+                proxmox_node: "pve02"
+                vm_id: 130
+                vm_memory: 4096
+                vm_cores: 2
+                vm_disk_size: "40G"
+                vm_network: "vmbr0"
+                vm_template: "ubuntu-22.04"
+                vm_tags: "dev,services,gitlab"
+            
+            dev-monitoring:
+              ansible_host: 192.168.1.131
+              ansible_user: root
+              environment: dev
+              cluster_role: service
+              service_type: monitoring
+              terraform_vars:
+                proxmox_node: "pve02"
+                vm_id: 131
+                vm_memory: 2048
+                vm_cores: 2
+                vm_disk_size: "30G"
+                vm_network: "vmbr0"
+                vm_template: "ubuntu-22.04"
+                vm_tags: "dev,services,monitoring"
+      
+      vars:
+        # Environment-specific variables
+        environment: dev
+        domain: dev.homelab.local
+        cluster_name: dev-cluster
+        datacenter: dev-dc
+        backup_enabled: true
+        monitoring_enabled: true
+        logging_level: debug
+        
+        # Network configuration
+        network:
+          cidr: "192.168.1.0/24"
+          gateway: "192.168.1.1"
+          dns_servers: ["192.168.1.1", "8.8.8.8"]
+        
+        # Proxmox configuration
+        proxmox:
+          api_url: "https://192.168.1.102:8006"
+          storage_pool: "local-zfs"
+          vm_template_path: "/var/lib/vz/template/iso/"
+          
+        # Kubernetes configuration
+        kubernetes:
+          version: "1.28"
+          cni: "cilium"
+          pod_cidr: "10.244.0.0/16"
+          service_cidr: "10.96.0.0/12"
+          
+        # Terraform configuration
+        terraform:
+          state_backend: "local"
+          workspace: "dev"
+          provider_version: ">= 3.0"

@@ -1,0 +1,247 @@
+---
+# Production Environment Inventory
+# This file defines all hosts and groups for the production environment
+
+all:
+  children:
+    prod:
+      children:
+        # Proxmox VE hosts
+        prod_pve:
+          hosts:
+            pve02-prod:
+              ansible_host: 192.168.3.102
+              ansible_user: root
+              environment: prod
+              cluster_role: pve
+              datacenter: prod-dc
+              terraform_vars:
+                proxmox_node: "pve02"
+                storage_pool: "local-zfs"
+                cluster_name: "prod-cluster"
+                vm_id_start: 300
+                vm_memory: 8192
+                vm_cores: 6
+                vm_disk_size: "128G"
+                vm_network: "vmbr0"
+                vm_template: "talos-v1.7.0"
+                vm_tags: "prod,homelab"
+        
+        # Kubernetes cluster hosts
+        prod_k8s:
+          children:
+            prod_k8s_control:
+              hosts:
+                prod-k8s-cp-01:
+                  ansible_host: 192.168.3.110
+                  ansible_user: root
+                  environment: prod
+                  cluster_role: control-plane
+                  cluster_name: prod-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 310
+                    vm_memory: 8192
+                    vm_cores: 6
+                    vm_disk_size: "64G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "prod,k8s,control-plane"
+                    talos_config_type: "controlplane"
+                
+                prod-k8s-cp-02:
+                  ansible_host: 192.168.3.111
+                  ansible_user: root
+                  environment: prod
+                  cluster_role: control-plane
+                  cluster_name: prod-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 311
+                    vm_memory: 8192
+                    vm_cores: 6
+                    vm_disk_size: "64G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "prod,k8s,control-plane"
+                    talos_config_type: "controlplane"
+                
+                prod-k8s-cp-03:
+                  ansible_host: 192.168.3.112
+                  ansible_user: root
+                  environment: prod
+                  cluster_role: control-plane
+                  cluster_name: prod-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 312
+                    vm_memory: 8192
+                    vm_cores: 6
+                    vm_disk_size: "64G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "prod,k8s,control-plane"
+                    talos_config_type: "controlplane"
+            
+            prod_k8s_workers:
+              hosts:
+                prod-k8s-worker-01:
+                  ansible_host: 192.168.3.120
+                  ansible_user: root
+                  environment: prod
+                  cluster_role: worker
+                  cluster_name: prod-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 320
+                    vm_memory: 32768
+                    vm_cores: 16
+                    vm_disk_size: "200G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "prod,k8s,worker"
+                    talos_config_type: "worker"
+                
+                prod-k8s-worker-02:
+                  ansible_host: 192.168.3.121
+                  ansible_user: root
+                  environment: prod
+                  cluster_role: worker
+                  cluster_name: prod-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 321
+                    vm_memory: 32768
+                    vm_cores: 16
+                    vm_disk_size: "200G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "prod,k8s,worker"
+                    talos_config_type: "worker"
+                
+                prod-k8s-worker-03:
+                  ansible_host: 192.168.3.122
+                  ansible_user: root
+                  environment: prod
+                  cluster_role: worker
+                  cluster_name: prod-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 322
+                    vm_memory: 32768
+                    vm_cores: 16
+                    vm_disk_size: "200G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "prod,k8s,worker"
+                    talos_config_type: "worker"
+                
+                prod-k8s-worker-04:
+                  ansible_host: 192.168.3.123
+                  ansible_user: root
+                  environment: prod
+                  cluster_role: worker
+                  cluster_name: prod-cluster
+                  node_type: talos
+                  terraform_vars:
+                    proxmox_node: "pve02"
+                    vm_id: 323
+                    vm_memory: 32768
+                    vm_cores: 16
+                    vm_disk_size: "200G"
+                    vm_network: "vmbr0"
+                    vm_template: "talos-v1.7.0"
+                    vm_tags: "prod,k8s,worker"
+                    talos_config_type: "worker"
+        
+        # Production services
+        prod_services:
+          hosts:
+            prod-gitlab:
+              ansible_host: 192.168.3.130
+              ansible_user: root
+              environment: prod
+              cluster_role: service
+              service_type: gitlab
+              terraform_vars:
+                proxmox_node: "pve02"
+                vm_id: 330
+                vm_memory: 16384
+                vm_cores: 8
+                vm_disk_size: "160G"
+                vm_network: "vmbr0"
+                vm_template: "ubuntu-22.04"
+                vm_tags: "prod,services,gitlab"
+            
+            prod-monitoring:
+              ansible_host: 192.168.3.131
+              ansible_user: root
+              environment: prod
+              cluster_role: service
+              service_type: monitoring
+              terraform_vars:
+                proxmox_node: "pve02"
+                vm_id: 331
+                vm_memory: 8192
+                vm_cores: 8
+                vm_disk_size: "120G"
+                vm_network: "vmbr0"
+                vm_template: "ubuntu-22.04"
+                vm_tags: "prod,services,monitoring"
+            
+            prod-backup:
+              ansible_host: 192.168.3.132
+              ansible_user: root
+              environment: prod
+              cluster_role: service
+              service_type: backup
+              terraform_vars:
+                proxmox_node: "pve02"
+                vm_id: 332
+                vm_memory: 4096
+                vm_cores: 4
+                vm_disk_size: "500G"
+                vm_network: "vmbr0"
+                vm_template: "ubuntu-22.04"
+                vm_tags: "prod,services,backup"
+      
+      vars:
+        # Environment-specific variables
+        environment: prod
+        domain: homelab.local
+        cluster_name: prod-cluster
+        datacenter: prod-dc
+        backup_enabled: true
+        monitoring_enabled: true
+        logging_level: warn
+        
+        # Network configuration
+        network:
+          cidr: "192.168.3.0/24"
+          gateway: "192.168.3.1"
+          dns_servers: ["192.168.3.1", "8.8.8.8"]
+        
+        # Proxmox configuration
+        proxmox:
+          api_url: "https://192.168.3.102:8006"
+          storage_pool: "local-zfs"
+          vm_template_path: "/var/lib/vz/template/iso/"
+          
+        # Kubernetes configuration
+        kubernetes:
+          version: "1.28"
+          cni: "cilium"
+          pod_cidr: "10.246.0.0/16"
+          service_cidr: "10.98.0.0/12"
+          
+        # Terraform configuration
+        terraform:
+          state_backend: "local"
+          workspace: "prod"
+          provider_version: ">= 3.0"

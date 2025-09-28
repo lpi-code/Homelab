@@ -1,8 +1,6 @@
 # Homelab Infrastructure
 
-This repository contains the complete infrastructure-as-code setup for a multi-cluster Kubernetes homelab running on Proxmox with Talos Linux and Flux GitOps.
-
-> **Note**: All commands in this documentation assume you're running from the repository root directory.
+This repository contains the complete infrastructure-as-code setup for a multi-cluster Kubernetes homelab running on Proxmox with Talos Linux and Flux GitOps, now reorganized with an environment-first structure and Ansible as the source of truth.
 
 ## 🏗️ Architecture Overview
 
@@ -10,223 +8,278 @@ This repository contains the complete infrastructure-as-code setup for a multi-c
 - **Orchestration**: Talos Linux + Kubernetes
 - **GitOps**: Flux CD
 - **Provisioning**: Terraform
-- **Configuration**: Ansible
-- **Clusters**: Development, Staging, Production
+- **Configuration**: Ansible (Source of Truth)
+- **Environments**: Development, Staging, Production
+- **Inventory**: Dynamic inventory with environment discovery
 
-## 📁 Folder Structure
+## 📁 New Structure
 
 ```
-homelab/
-├── .github/                          # GitHub workflows and templates
-│   ├── workflows/                    # CI/CD pipelines
-│   ├── ISSUE_TEMPLATE/              # Issue templates
-│   └── PULL_REQUEST_TEMPLATE/       # PR templates
-├── clusters/                         # Kubernetes cluster configurations
-│   ├── dev/                         # Development cluster
-│   │   ├── talos/                   # Talos Linux configs
-│   │   │   ├── control-plane/       # Control plane node configs
-│   │   │   ├── worker/              # Worker node configs
-│   │   │   └── configs/             # Cluster-specific configs
-│   │   ├── flux/                    # Cluster-specific Flux GitOps configs
-│   │   │   ├── bootstrap/           # Flux bootstrap for this cluster
-│   │   │   ├── apps/                # Applications deployed to this cluster
-│   │   │   ├── infrastructure/      # Infrastructure for this cluster
-│   │   │   └── monitoring/          # Monitoring stack for this cluster
-│   │   └── apps/                    # Application configurations
-│   │       ├── monitoring/          # Monitoring applications
-│   │       ├── networking/          # CNI and networking
-│   │       ├── storage/             # Storage solutions
-│   │       ├── security/            # Security tools
-│   │       └── platform/            # Platform services
-│   ├── staging/                     # Staging cluster (same structure as dev)
-│   └── prod/                        # Production cluster (same structure as dev)
-├── configs/                         # Configuration files
-│   ├── proxmox/                     # Proxmox configurations
-│   │   ├── nodes/                   # Node-specific configs
-│   │   │   ├── pve01/              # Proxmox node 1 configs
-│   │   │   ├── pve02/              # Proxmox node 2 configs
-│   │   │   └── pve03/              # Proxmox node 3 configs
-│   │   └── templates/               # Configuration templates
-│   ├── talos/                       # Talos Linux configs
-│   │   ├── templates/               # Talos configuration templates
-│   │   └── patches/                 # Configuration patches
-│   ├── flux/                        # Global Flux templates and common configs
-│   │   ├── templates/               # Flux configuration templates
-│   │   ├── common-apps/             # Common applications across clusters
-│   │   └── infrastructure/          # Common infrastructure components
-│   └── secrets/                     # Encrypted secrets
-│       ├── encrypted/               # Encrypted secret files
-│       └── keys/                    # Encryption keys
-├── docs/                            # Documentation
-│   ├── architecture/                # Architecture documentation
-│   ├── deployment/                  # Deployment guides
-│   ├── operations/                  # Operational procedures
-│   └── troubleshooting/             # Troubleshooting guides
-├── infrastructure/                  # Infrastructure as Code
-│   ├── proxmox/                     # Proxmox configurations
-│   │   ├── nodes/                   # Node configurations
-│   │   │   ├── pve01/              # Node 1 specific configs
-│   │   │   ├── pve02/              # Node 2 specific configs
-│   │   │   └── pve03/              # Node 3 specific configs
-│   │   └── templates/               # Configuration templates
-│   ├── terraform/                   # Terraform configurations
-│   │   ├── environments/            # Environment-specific configs
-│   │   │   ├── dev/                # Development environment
-│   │   │   ├── staging/            # Staging environment
-│   │   │   └── prod/               # Production environment
-│   │   ├── modules/                 # Reusable Terraform modules
-│   │   │   ├── proxmox-vm/         # Proxmox VM module
-│   │   │   ├── talos-cluster/      # Talos cluster module
-│   │   │   └── network/            # Network module
-│   │   ├── global/                  # Global Terraform configs
-│   │   └── workspaces/              # Terraform workspaces
-│   │       ├── dev/                # Dev workspace
-│   │       ├── staging/            # Staging workspace
-│   │       └── prod/               # Production workspace
-│   └── ansible/                     # Ansible playbooks
-│       ├── inventory/               # Ansible inventory
-│       ├── playbooks/               # Ansible playbooks
-│       ├── roles/                   # Ansible roles
-│       ├── group_vars/              # Group variables
-│       └── host_vars/               # Host variables
-├── scripts/                         # Automation scripts
-│   ├── proxmox/                     # Proxmox management scripts
-│   │   ├── setup/                   # Setup scripts
-│   │   ├── maintenance/             # Maintenance scripts
-│   │   └── backup/                  # Backup scripts
-│   ├── terraform/                   # Terraform helper scripts
-│   │   ├── helpers/                 # Helper scripts
-│   │   └── validation/              # Validation scripts
-│   ├── talos/                       # Talos management scripts
-│   │   ├── bootstrap/               # Bootstrap scripts
-│   │   ├── upgrade/                 # Upgrade scripts
-│   │   └── maintenance/             # Maintenance scripts
-│   ├── flux/                        # Flux management scripts
-│   │   ├── bootstrap/               # Bootstrap scripts
-│   │   └── deploy/                  # Deployment scripts
-│   └── utils/                       # Utility scripts
-│       ├── common/                  # Common utilities
-│       ├── monitoring/              # Monitoring utilities
-│       └── backup/                  # Backup utilities
-├── tools/                           # Development and operational tools
-│   ├── monitoring/                  # Monitoring tools
-│   ├── backup/                      # Backup tools
-│   ├── security/                    # Security tools
-│   └── validation/                  # Validation tools
-├── secrets/                         # Secret management
-│   ├── encrypted/                   # Encrypted secrets
-│   ├── keys/                        # Encryption keys
-│   └── templates/                   # Secret templates
-└── Scripts/                         # Legacy scripts (to be migrated)
+Homelab/
+├── environments/                          # Environment-first organization
+│   ├── dev/                              # Development environment
+│   │   ├── ansible/                      # Dev-specific ansible configs
+│   │   │   ├── inventory/
+│   │   │   │   └── hosts.yaml           # Dev hosts with terraform_vars
+│   │   │   ├── group_vars/
+│   │   │   │   ├── dev/
+│   │   │   │   │   ├── main.yaml        # Common dev variables
+│   │   │   │   │   └── terraform.yaml   # Terraform-specific variables
+│   │   │   │   └── all/                 # Shared variables
+│   │   │   ├── host_vars/
+│   │   │   │   └── dev-hosts/           # Dev-specific host vars
+│   │   ├── terraform/                   # Dev-specific terraform
+│   │   │   ├── main.tf
+│   │   │   ├── variables.tf
+│   │   │   ├── outputs.tf
+│   │   │   ├── data-sources.tf          # Ansible data integration
+│   │   │   └── terraform.tfvars
+│   │   ├── kubernetes/                  # Dev-specific k8s configs
+│   │   │   ├── clusters/
+│   │   │   └── apps/
+│   │   └── configs/                     # Dev-specific configs
+│   │       ├── flux/
+│   │       ├── talos/
+│   │       └── proxmox/
+│   │
+│   ├── staging/                         # Staging environment
+│   │   └── [same structure as dev]
+│   │
+│   └── prod/                            # Production environment
+│       └── [same structure as dev]
+│
+├── shared/                              # Shared components across environments
+│   ├── ansible/                         # Shared ansible components
+│   │   ├── inventory/
+│   │   │   └── dynamic_inventory.py    # Dynamic inventory merger
+│   │   ├── playbooks/                  # Shared playbooks
+│   │   │   ├── infrastructure/
+│   │   │   │   ├── proxmox-setup.yml
+│   │   │   │   ├── zfs-setup.yml
+│   │   │   │   ├── network-setup.yml
+│   │   │   │   └── deploy-cluster.yml
+│   │   │   ├── kubernetes/
+│   │   │   │   ├── talos-bootstrap.yml
+│   │   │   │   └── cluster-setup.yml
+│   │   │   └── maintenance/
+│   │   │       ├── backup.yml
+│   │   │       └── updates.yml
+│   │   ├── roles/                      # Shared roles
+│   │   │   ├── proxmox/
+│   │   │   ├── kubernetes/
+│   │   │   └── monitoring/
+│   │   └── requirements.yml
+│   │
+│   ├── terraform/                      # Shared terraform modules
+│   │   ├── modules/
+│   │   │   ├── network/
+│   │   │   ├── proxmox-vm/
+│   │   │   ├── talos-cluster/
+│   │   │   └── monitoring/
+│   │   └── global/                     # Global resources
+│   │       ├── providers.tf
+│   │       └── backend.tf
+│   │
+│   ├── kubernetes/                     # Shared k8s components
+│   │   ├── base/                       # Base manifests
+│   │   ├── apps/                       # Shared applications
+│   │   └── templates/                  # Kustomize templates
+│   │
+│   ├── configs/                        # Shared configuration templates
+│   │   ├── flux/
+│   │   ├── talos/
+│   │   └── proxmox/
+│   │
+│   └── scripts/                        # Shared scripts
+│       ├── ansible/
+│       ├── terraform/
+│       ├── kubernetes/
+│       └── utils/
+│
+├── docs/                               # Documentation
+│   ├── MIGRATION_GUIDE.md             # Migration instructions
+│   ├── USAGE_GUIDE.md                 # Usage documentation
+│   └── ARCHITECTURE.md                # Architecture details
+├── secrets/                            # Encrypted secrets
+├── ansible.cfg                         # Updated to use dynamic inventory
+├── requirements.yaml                   # Global requirements
+└── README.md
 ```
-
-## 🔄 Flux GitOps Structure
-
-**Two-level Flux organization:**
-
-1. **Global Templates** (`configs/flux/`):
-   - `templates/` - Reusable Flux configuration templates
-   - `common-apps/` - Applications used across all clusters
-   - `infrastructure/` - Common infrastructure components
-
-2. **Cluster-Specific** (`clusters/{env}/flux/`):
-   - `bootstrap/` - Flux bootstrap configuration for this specific cluster
-   - `apps/` - Applications deployed only to this cluster
-   - `infrastructure/` - Infrastructure specific to this cluster
-   - `monitoring/` - Monitoring stack for this cluster
-
-**How it works:**
-- Each cluster's Flux points to this repository
-- Global templates provide reusable components
-- Cluster-specific folders contain what actually gets deployed
-- Flux watches the cluster-specific folders for changes
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
+- Python 3.8+
+- Ansible 2.9+
+- Terraform 1.0+
 - Proxmox VE cluster
-- Terraform >= 1.0
-- Ansible >= 2.9
-- Talos Linux ISO
-- Flux CLI
+- SSH access to target hosts
 
-### Getting Started
+### Installation
 
-1. **Configure Proxmox Nodes**
+1. **Clone repository**
    ```bash
-   # Navigate to the setup script (from repository root)
-   cd scripts/proxmox/setup/
-   
-   # Configure PVE02 with custom answer file
-   ./setup-unatend-proxmox.sh \
-       --distro proxmox \
-       --answer-file ../../infrastructure/proxmox/nodes/pve02/unattend_pve02.toml \
-       --out /path/to/output/unattended-pve02.iso
+   git clone <repository-url>
+   cd homelab
    ```
 
-2. **Initialize Terraform**
+2. **Install dependencies**
    ```bash
-   cd infrastructure/terraform/environments/dev
-   terraform init
-   terraform plan
+   pip install -r requirements.txt
    ```
 
-3. **Bootstrap Talos Cluster**
+3. **Configure SSH access**
    ```bash
-   cd clusters/dev/talos
-   # Configure Talos cluster
+   ssh-copy-id root@192.168.1.102
+   # ... for all hosts
    ```
 
-4. **Install Flux**
+4. **Test dynamic inventory**
    ```bash
-   cd clusters/dev/flux/bootstrap
-   # Bootstrap Flux
+   ./shared/ansible/inventory/dynamic_inventory.py --list-environments
    ```
 
-## 📋 Configuration Management
+### Basic Usage
 
-- **Proxmox Configs**: Node-specific configurations in `infrastructure/proxmox/nodes/`
-- **Terraform Modules**: Reusable modules in `infrastructure/terraform/modules/`
-- **Cluster Configs**: Environment-based configurations
-- **Scripts**: Organized by functionality in `scripts/`
+```bash
+# List all environments
+./shared/ansible/inventory/dynamic_inventory.py --list-environments
+
+# List all hosts
+ansible all --list-hosts
+
+# Test connectivity
+ansible dev -m ping
+
+# Run infrastructure setup
+ansible-playbook shared/ansible/playbooks/infrastructure/proxmox-setup.yml -e target_environment=dev
+
+# Deploy with Terraform
+cd environments/dev/terraform
+terraform init
+terraform plan -var="target_host=pve02-dev"
+```
+
+## 🔧 Key Features
+
+### Dynamic Inventory System
+
+- **Automatic Discovery**: Discovers hosts from all environments
+- **Environment Isolation**: Clear separation between dev/staging/prod
+- **Single Source of Truth**: Ansible inventory drives all configuration
+- **Validation**: Built-in inventory validation and error checking
+
+### Terraform Integration
+
+- **Bidirectional Data Flow**: Terraform queries Ansible for host information
+- **No Duplication**: Host variables defined once in Ansible inventory
+- **Environment Consistency**: Same variables used across tools
+- **State Independence**: Terraform state separate from Ansible data
+
+### Environment Management
+
+- **Environment-First**: Clear separation by environment
+- **Shared Components**: Common playbooks, roles, and modules
+- **Consistent Structure**: Same layout across all environments
+- **Scalable**: Easy to add new environments
+
+## 📋 Usage Examples
+
+### Dynamic Inventory
+
+```bash
+# List environments
+./shared/ansible/inventory/dynamic_inventory.py --list-environments
+
+# List all hosts
+./shared/ansible/inventory/dynamic_inventory.py --list
+
+# List dev environment hosts
+./shared/ansible/inventory/dynamic_inventory.py --list --env dev
+
+# Get host variables
+./shared/ansible/inventory/dynamic_inventory.py --host pve02-dev
+
+# Validate inventory
+./shared/ansible/inventory/dynamic_inventory.py --validate
+```
+
+### Ansible Operations
+
+```bash
+# Environment targeting
+ansible dev -m ping
+ansible staging -m ping
+ansible prod -m ping
+
+# Group targeting
+ansible dev_pve -m ping
+ansible dev_k8s_control -m ping
+
+# Playbook execution
+ansible-playbook shared/ansible/playbooks/infrastructure/proxmox-setup.yml -e target_environment=dev
+ansible-playbook shared/ansible/playbooks/kubernetes/talos-bootstrap.yml -e target_environment=dev
+```
+
+### Terraform Operations
+
+```bash
+# Navigate to environment
+cd environments/dev/terraform
+
+# Initialize and plan
+terraform init
+terraform plan -var="target_host=pve02-dev"
+
+# Apply infrastructure
+terraform apply -var="target_host=pve02-dev"
+```
 
 ## 🔐 Security
 
-- All secrets are encrypted using SOPS
-- Encryption keys stored in `secrets/keys/`
-- Encrypted secrets in `secrets/encrypted/`
-- Access control via Git repository permissions
-
-## 📊 Monitoring
-
-- Prometheus + Grafana stack
-- Cluster health monitoring
-- Infrastructure monitoring
-- Application monitoring
-
-## 🔄 GitOps Workflow
-
-1. **Infrastructure Changes**: Terraform → Proxmox
-2. **Cluster Provisioning**: Terraform → Talos
-3. **Application Deployment**: Flux → Kubernetes
-4. **Configuration Management**: Ansible → All nodes
+- All secrets encrypted using SOPS
+- SSH key-based authentication
+- Environment-specific access controls
+- Encrypted secret storage in `secrets/` directory
 
 ## 📚 Documentation
 
-- [Architecture](docs/architecture/)
-- [Deployment Guide](docs/deployment/)
-- [Operations](docs/operations/)
-- [Troubleshooting](docs/troubleshooting/)
+- **[Migration Guide](docs/MIGRATION_GUIDE.md)**: Step-by-step migration instructions
+- **[Usage Guide](docs/USAGE_GUIDE.md)**: Comprehensive usage documentation
+- **[Architecture Guide](docs/ARCHITECTURE.md)**: Detailed architecture overview
+
+## 🧪 Testing
+
+```bash
+# Validate inventory
+./shared/ansible/inventory/dynamic_inventory.py --validate
+
+# Test connectivity
+ansible all -m ping
+
+# Test Terraform integration
+./shared/scripts/terraform/ansible_data_source.py --hostname pve02-dev --environment dev
+
+# Run playbook tests
+ansible-playbook shared/ansible/playbooks/infrastructure/proxmox-setup.yml -e target_environment=dev --check
+```
 
 ## 🤝 Contributing
 
-1. Create feature branch
-2. Make changes
-3. Test thoroughly
-4. Submit pull request
-5. Review and merge
+1. Follow the environment-first structure
+2. Update inventory files for new hosts
+3. Use shared playbooks and roles
+4. Maintain environment isolation
+5. Update documentation
 
 ## 📄 License
 
-[Add your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- Check [Migration Guide](docs/MIGRATION_GUIDE.md) for setup issues
+- Review [Usage Guide](docs/USAGE_GUIDE.md) for operational questions
+- Create issues for bugs or feature requests
+- Check troubleshooting sections in documentation
