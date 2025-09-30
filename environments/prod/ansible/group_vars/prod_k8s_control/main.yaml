@@ -1,0 +1,6 @@
+---
+# Production Kubernetes Control Plane group variables
+
+cluster_role: control-plane
+cluster_name: prod-cluster
+node_type: talos

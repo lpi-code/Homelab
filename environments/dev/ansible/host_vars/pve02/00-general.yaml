@@ -1,0 +1,24 @@
+#  ________  ___      ___ _______   ________    _______         
+# |\   __  \|\  \    /  /|\  ___ \ |\   __  \  /  ___  \        
+# \ \  \|\  \ \  \  /  / | \   __/|\ \  \|\  \/__/|_/  /|       
+#  \ \   ____\ \  \/  / / \ \  \_|/_\ \  \\\  \__|//  / /       
+#   \ \  \___|\ \    / /   \ \  \_|\ \ \  \\\  \  /  /_/__      
+#    \ \__\    \ \__/ /     \ \_______\ \_______\|\________\    
+#     \|__|     \|__|/       \|_______|\|_______| \|_______|    
+#                                                               
+#                                                               
+#                                                               
+
+hostname: "pve02"
+ansible_host: "192.168.0.149"
+ansible_user: "root"
+# Disable host key checking because this is a dev environment that will be destroyed on a regular basis
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+ansible_host_key_checking: false
+
+# Localization
+locale:
+  keyboard: "fr"
+  country: "fr"
+  timezone: "Europe/Paris"
+

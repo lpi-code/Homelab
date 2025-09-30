@@ -1,0 +1,9 @@
+[all]
+
+[prod_pve]
+
+[prod_k8s_control]
+
+[prod_k8s_workers]
+
+[prod_services]

@@ -1,0 +1,4 @@
+---
+# Production Services group variables
+
+cluster_role: service

@@ -1,0 +1,40 @@
+
+# Storage Configuration
+storage:
+  filesystem: "zfs"
+  zfs:
+    raid_level: "raid0"
+    hdsize: 220
+    ashift: 12
+    arc_max: 1024
+    checksum: "on"
+    compress: "lz4"
+    copies: 1
+  target_disk: "SanDisk_SSD_PLUS_240GB"
+
+# ZFS Pools Configuration for Additional Disks
+zfs_pools:
+  - name: "storage"
+    disks:
+      - "ST1000DM010-2EP1"  # 1TB HDD model
+    ashift: 12
+    compression: "lz4"
+    checksum: "on"
+    atime: "off"
+    sync: "standard"
+    datasets:
+      - name: "vms"
+        mountpoint: "/var/lib/vz"
+        compression: "lz4"
+        quota: ""
+        reservation: ""
+      - name: "backups"
+        mountpoint: "/var/lib/backups"
+        compression: "lz4"
+        quota: ""
+        reservation: ""
+      - name: "isos"
+        mountpoint: "/var/lib/vz/template/iso"
+        compression: "lz4"
+        quota: ""
+        reservation: ""

@@ -1,0 +1,488 @@
+---
+- name: Proxmox VE Post-Install Routines (Ansible, shell-minimized)
+  hosts: pve
+  become: true
+  gather_facts: false
+
+  vars:
+    # ===== choices you would have made in whiptail =====
+    correct_sources: true
+
+    # 8.x
+    disable_pve_enterprise: true
+    enable_pve_no_subscription: true
+    correct_ceph_sources_8: true
+    add_pvetest_disabled_8: true
+
+    # 9.x (we manage content instead of "commenting stanzas in-place")
+    migrate_to_deb822_9: true
+    disable_legacy_sources_9: true
+    pve_enterprise_state_9: "disabled"      # enabled|disabled|absent
+    pve_no_subscription_state_9: "enabled"  # enabled|disabled|absent
+    ceph_state_9: "enabled"                 # enabled|absent
+    add_pvetest_disabled_9: true
+
+    disable_subscription_nag: true
+    enable_ha: false
+    disable_ha: false
+    disable_corosync_if_disabling_ha: true
+
+    do_update: true
+    reboot_after: false
+
+    # User roles:
+    required_permissions:
+        - "Realm.AllocateUser"
+        - "VM.PowerMgmt"
+        - "VM.GuestAgent.Unrestricted"
+        - "Sys.Console"
+        - "Sys.Audit"
+        - "Sys.AccessNetwork"
+        - "VM.Config.Cloudinit"
+        - "VM.Replicate"
+        - "Pool.Allocate"
+        - "SDN.Audit"
+        - "Realm.Allocate"
+        - "SDN.Use"
+        - "Mapping.Modify"
+        - "VM.Config.Memory"
+        - "VM.GuestAgent.FileSystemMgmt"
+        - "VM.Allocate"
+        - "SDN.Allocate"
+        - "VM.Console"
+        - "VM.Clone"
+        - "VM.Backup"
+        - "Datastore.AllocateTemplate"
+        - "VM.Snapshot"
+        - "VM.Config.Network"
+        - "Sys.Incoming"
+        - "Sys.Modify"
+        - "VM.Snapshot.Rollback"
+        - "VM.Config.Disk"
+        - "Datastore.Allocate"
+        - "VM.Config.CPU"
+        - "VM.Config.CDROM"
+        - "Group.Allocate"
+        - "Datastore.Audit"
+        - "VM.Migrate"
+        - "VM.GuestAgent.FileWrite"
+        - "Mapping.Use"
+        - "Datastore.AllocateSpace"
+        - "Sys.Syslog"
+        - "VM.Config.Options"
+        - "Pool.Audit"
+        - "User.Modify"
+        - "VM.Config.HWType"
+        - "VM.Audit"
+        - "Sys.PowerMgmt"
+        - "VM.GuestAgent.Audit"
+        - "Mapping.Audit"
+        - "VM.GuestAgent.FileRead"
+        - "Permissions.Modify"
+
+  tasks:
+    - name: Get Proxmox version string
+      ansible.builtin.command: pveversion
+      register: pvev
+      changed_when: false
+
+    - name: Parse PVE version
+      ansible.builtin.set_fact:
+        pve_major: "{{ (pvev.stdout | regex_findall('pve-manager\\/(\\d+)\\.(\\d+)') | first)[0] | int }}"
+        pve_minor: "{{ (pvev.stdout | regex_findall('pve-manager\\/(\\d+)\\.(\\d+)') | first)[1] | int }}"
+        
+    - name: Assert supported versions
+      ansible.builtin.assert:
+        that:
+          - (pve_major | int == 8 and (pve_minor | int >= 0 and pve_minor | int <= 9)) or (pve_major | int == 9 and pve_minor | int == 0)
+        fail_msg: "Unsupported PVE version {{ pve_major }}.{{ pve_minor }} (supported: 8.0–8.9.x and 9.0)"
+
+    # =========================
+    # Proxmox User Management
+    # ========================
+    - name: Enforce root password
+      ansible.builtin.user:
+        name: root
+        state: present
+        password: "{{ root_password | password_hash('sha512') }}"
+        update_password: always
+     
+    - name: Create proxmox api user (instead of using root)
+      community.proxmox.proxmox_user:
+        api_host: "{{ ansible_host }}"
+        api_user: "root@pam"
+        api_password: "{{ root_password }}"
+        userid: "{{ proxmox_user }}@pve"
+        password: "{{ proxmox_password }}"
+        groups: ""
+        state: present
+        comment: "This user is used for Terraform & Ansible to manage the Proxmox infrastructure."
+        validate_certs: "{{ proxmox_validate_certs }}" 
+
+    - name: Check if Terraform role exists
+      command: pveum role list
+      register: role_list
+      changed_when: false
+      failed_when: false
+      
+    - name: Create Terraform role if it doesn't exist
+      command: >
+        pveum role add {{ proxmox_role_name }} -privs "{{ required_permissions | join(' ') }}"
+      when: proxmox_role_name not in role_list.stdout
+      
+    - name: Update Terraform role privileges if role exists
+      command: >
+        pveum role modify {{ proxmox_role_name }} -privs "{{ required_permissions | join(' ') }}"
+      when: proxmox_role_name in role_list.stdout
+      
+    - name: Assign Terraform role to terraform user
+      command: pveum aclmod / -user {{ proxmox_user }}@pve -role {{ proxmox_role_name }}
+      changed_when: false
+
+    # =========================
+    # PVE 8.x (Debian bookworm)
+    # =========================
+    - block:
+        - name: 8.x | Correct Debian sources.list
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              deb http://deb.debian.org/debian bookworm main contrib
+              deb http://deb.debian.org/debian bookworm-updates main contrib
+              deb http://security.debian.org/debian-security bookworm-security main contrib
+          when: correct_sources
+
+        - name: 8.x | Disable firmware warning (bookworm)
+          ansible.builtin.copy:
+            dest: /etc/apt/apt.conf.d/no-bookworm-firmware.conf
+            owner: root
+            group: root
+            mode: "0644"
+            content: 'APT::Get::Update::SourceListWarnings::NonFreeFirmware "false";'
+          when: correct_sources
+
+        - name: 8.x | Disable pve-enterprise repository
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/pve-enterprise.list
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              # deb https://enterprise.proxmox.com/debian/pve bookworm pve-enterprise
+          when: disable_pve_enterprise
+
+        - name: 8.x | Enable pve-no-subscription repository
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/pve-install-repo.list
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription
+          when: enable_pve_no_subscription
+
+        - name: 8.x | Ceph repos file (all commented)
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/ceph.list
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              # deb https://enterprise.proxmox.com/debian/ceph-quincy bookworm enterprise
+              # deb http://download.proxmox.com/debian/ceph-quincy bookworm no-subscription
+              # deb https://enterprise.proxmox.com/debian/ceph-reef bookworm enterprise
+              # deb http://download.proxmox.com/debian/ceph-reef bookworm no-subscription
+          when: correct_ceph_sources_8
+
+        - name: 8.x | Add pvetest list (disabled)
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/pvetest-for-beta.list
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              # deb http://download.proxmox.com/debian/pve bookworm pvetest
+          when: add_pvetest_disabled_8
+      when: pve_major == 8
+
+    # =========================
+    # PVE 9.x (Debian trixie)
+    # =========================
+    - block:
+        - name: 9.x | Ensure deb822 Debian sources
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/debian.sources
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              Types: deb
+              URIs: http://deb.debian.org/debian
+              Suites: trixie
+              Components: main contrib
+              Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+              Types: deb
+              URIs: http://security.debian.org/debian-security
+              Suites: trixie-security
+              Components: main contrib
+              Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+              Types: deb
+              URIs: http://deb.debian.org/debian
+              Suites: trixie-updates
+              Components: main contrib
+              Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+          when: migrate_to_deb822_9
+
+        - name: 9.x | Comment out entries in /etc/apt/sources.list (legacy)
+          ansible.builtin.replace:
+            path: /etc/apt/sources.list
+            regexp: '^\s*deb\s+'
+            replace: '# Disabled by Ansible '
+          when: disable_legacy_sources_9 and migrate_to_deb822_9 and
+                (ansible_facts['discovered_interpreter_python'] is defined)
+
+        - name: 9.x | Find legacy .list files
+          ansible.builtin.find:
+            paths: /etc/apt/sources.list.d
+            patterns: "*.list"
+            file_type: file
+          register: legacy_lists
+          when: disable_legacy_sources_9 and migrate_to_deb822_9
+
+        - name: 9.x | Backup legacy .list to .bak (no shell)
+          ansible.builtin.copy:
+            src: "{{ item.path }}"
+            dest: "{{ item.path }}.bak"
+            owner: root
+            group: root
+            mode: "0644"
+            remote_src: true
+          loop: "{{ legacy_lists.files | default([]) }}"
+          when: disable_legacy_sources_9 and migrate_to_deb822_9
+
+        - name: 9.x | Remove legacy .list after backup
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ legacy_lists.files | default([]) }}"
+          when: disable_legacy_sources_9 and migrate_to_deb822_9
+
+        # ---- pve-enterprise (manage by owning the file) ----
+        - name: 9.x | Remove any stray pve-enterprise.sources
+          ansible.builtin.find:
+            paths: /etc/apt/sources.list.d
+            patterns: "*pve-enterprise*.sources"
+          register: pve_ent_files
+        - name: 9.x | Ensure pve-enterprise.sources absent
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ pve_ent_files.files }}"
+          when: pve_ent_files.matched | default(0) > 0
+
+        - name: 9.x | Create pve-enterprise (enabled or commented)
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/pve-enterprise.sources
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              {% if pve_enterprise_state_9 == 'enabled' -%}
+              Types: deb
+              URIs: https://enterprise.proxmox.com/debian/pve
+              Suites: trixie
+              Components: pve-enterprise
+              Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+              {%- elif pve_enterprise_state_9 == 'disabled' -%}
+              # Types: deb
+              # URIs: https://enterprise.proxmox.com/debian/pve
+              # Suites: trixie
+              # Components: pve-enterprise
+              # Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+              {%- endif %}
+          when: pve_enterprise_state_9 in ['enabled','disabled']
+
+        # ---- pve-no-subscription (own the file) ----
+        - name: 9.x | Ensure proxmox.sources present as desired
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/proxmox.sources
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              {% if pve_no_subscription_state_9 == 'enabled' -%}
+              Types: deb
+              URIs: http://download.proxmox.com/debian/pve
+              Suites: trixie
+              Components: pve-no-subscription
+              Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+              {%- elif pve_no_subscription_state_9 == 'disabled' -%}
+              # Types: deb
+              # URIs: http://download.proxmox.com/debian/pve
+              # Suites: trixie
+              # Components: pve-no-subscription
+              # Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+              {%- endif %}
+          when: pve_no_subscription_state_9 in ['enabled','disabled']
+
+        - name: 9.x | Ensure proxmox.sources absent if requested
+          ansible.builtin.file:
+            path: /etc/apt/sources.list.d/proxmox.sources
+            state: absent
+          when: pve_no_subscription_state_9 == 'absent'
+
+        # ---- Ceph (own the file) ----
+        - name: 9.x | Ensure ceph.sources present/absent
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/ceph.sources
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              Types: deb
+              URIs: http://download.proxmox.com/debian/ceph-squid
+              Suites: trixie
+              Components: no-subscription
+              Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+          when: ceph_state_9 == 'enabled'
+
+        - name: 9.x | Remove ceph.sources (and any ceph enterprise remnants)
+          ansible.builtin.file:
+            path: /etc/apt/sources.list.d/ceph.sources
+            state: absent
+          when: ceph_state_9 == 'absent'
+
+        - name: 9.x | Remove enterprise Ceph *.sources if any
+          ansible.builtin.find:
+            paths: /etc/apt/sources.list.d
+            patterns: "*ceph*.sources"
+          register: ceph_all_sources
+        - name: 9.x | Delete enterprise Ceph sources containing 'enterprise.proxmox.com'
+          ansible.builtin.lineinfile:
+            path: "{{ item.path }}"
+            regexp: '.*'
+            state: absent
+          loop: "{{ ceph_all_sources.files | default([]) }}"
+          when: item.path is search('enterprise')
+      when: pve_major == 9
+
+    # =========================
+    # Common post-routines
+    # =========================
+    - name: Reinstall proxmox-widget-toolkit (best-effort)
+      ansible.builtin.command: apt --reinstall -y install proxmox-widget-toolkit
+      register: reinstall_out
+      changed_when: "'Setting up proxmox-widget-toolkit' in (reinstall_out.stdout | default('')) or 'reinstall' in (reinstall_out.stdout | default(''))"
+      failed_when: false
+
+    - name: Disable subscription nag | script file
+      ansible.builtin.copy:
+        dest: /usr/local/bin/pve-remove-nag.sh
+        mode: "0755"
+        owner: root
+        group: root
+        content: |
+          #!/bin/sh
+          WEB_JS=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+          if [ -s "$WEB_JS" ] && ! grep -q NoMoreNagging "$WEB_JS"; then
+              sed -i -e "/data\.status/ s/!//" -e "/data\.status/ s/active/NoMoreNagging/" "$WEB_JS"
+          fi
+          MOBILE_TPL=/usr/share/pve-yew-mobile-gui/index.html.tpl
+          MARKER="<!-- MANAGED BLOCK FOR MOBILE NAG -->"
+          if [ -f "$MOBILE_TPL" ] && ! grep -q "$MARKER" "$MOBILE_TPL"; then
+              printf "%s\n" \
+                "$MARKER" \
+                "<script>" \
+                "  function removeSubscriptionElements() {" \
+                "    const dialogs = document.querySelectorAll('dialog.pwt-outer-dialog');" \
+                "    dialogs.forEach(dialog => {" \
+                "      const closeButton = dialog.querySelector('.fa-close');" \
+                "      const exclamationIcon = dialog.querySelector('.fa-exclamation-triangle');" \
+                "      const continueButton = dialog.querySelector('button');" \
+                "      if (closeButton && exclamationIcon && continueButton) { dialog.remove(); }" \
+                "    });" \
+                "    const cards = document.querySelectorAll('.pwt-card.pwt-p-2.pwt-d-flex.pwt-interactive.pwt-justify-content-center');" \
+                "    cards.forEach(card => {" \
+                "      const hasInteractiveElements = card.querySelector('button, input, a');" \
+                "      const hasComplexStructure = card.querySelector('.pwt-grid, .pwt-flex, .pwt-button');" \
+                "      if (!hasInteractiveElements && !hasComplexStructure) { card.remove(); }" \
+                "    });" \
+                "  }" \
+                "  const observer = new MutationObserver(removeSubscriptionElements);" \
+                "  observer.observe(document.body, { childList: true, subtree: true });" \
+                "  removeSubscriptionElements();" \
+                "  setInterval(removeSubscriptionElements, 300);" \
+                "  setTimeout(() => {observer.disconnect();}, 10000);" \
+                "</script>" >> "$MOBILE_TPL"
+          fi
+      when: disable_subscription_nag
+
+    - name: Disable subscription nag | apt post-invoke hook
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/no-nag-script
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          DPkg::Post-Invoke { "/usr/local/bin/pve-remove-nag.sh"; };
+      when: disable_subscription_nag
+
+    - name: Enable HA services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - pve-ha-lrm
+        - pve-ha-crm
+        - corosync
+      when: enable_ha
+
+    - name: Disable HA services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - pve-ha-lrm
+        - pve-ha-crm
+      when: disable_ha
+
+    - name: Optionally disable corosync too (single-node)
+      ansible.builtin.service:
+        name: corosync
+        state: stopped
+        enabled: false
+      when: disable_ha and disable_corosync_if_disabling_ha
+
+    - name: Update APT cache
+      ansible.builtin.apt:
+        update_cache: true
+      when: do_update
+
+    - name: Dist-upgrade
+      ansible.builtin.apt:
+        upgrade: dist
+      when: do_update
+
+    - name: Reboot node (recommended after changes)
+      ansible.builtin.reboot:
+        msg: "Rebooting after Proxmox VE post-install routines"
+        reboot_timeout: 1800
+      when: reboot_after
+    
+    - name: Enable NAT (masquerading) on network bridge
+      ansible.builtin.iptables:
+        table: nat
+        chain: POSTROUTING
+        out_interface: "{{ item.name }}"
+        jump: MASQUERADE
+        state: present
+      become: true
+      loop: "{{ networks }}"
+      when: item.enable_nat

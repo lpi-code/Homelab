@@ -1,0 +1,615 @@
+---
+- name: ZFS Pool Setup for Additional Disks
+  hosts: pve
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../host_vars/{{ inventory_hostname }}/main.yaml"
+    - "{{ playbook_dir }}/../host_vars/{{ inventory_hostname }}/secrets.yaml"
+
+  vars:
+    # Default ZFS settings (can be overridden in host_vars)
+    zfs_default_pool_name: "storage"
+    zfs_default_ashift: 12
+    zfs_default_compression: "lz4"
+    zfs_default_checksum: "on"
+    zfs_default_atime: "off"
+    zfs_default_sync: "standard"
+
+  pre_tasks:
+    - name: Check if ZFS package is installed
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Fail if ZFS is not available
+      ansible.builtin.fail:
+        msg: "ZFS is not installed or not available on this system"
+      when: "'zfsutils-linux' not in ansible_facts.packages | default({}) and 'zfs' not in ansible_facts.packages | default({})"
+
+    - name: Install required packages
+      ansible.builtin.package:
+        name:
+          - util-linux  # for wipefs
+          - zfsutils-linux  # ensure ZFS is available
+          - gdisk  # for sgdisk (EFI partition table handling)
+          - python3-proxmoxer  # for Proxmox API integration
+        state: present
+
+    - name: Gather block device facts
+      ansible.builtin.setup:
+        gather_subset:
+          - hardware
+          - devices
+
+    - name: Display available block devices and models
+      ansible.builtin.debug:
+        msg: "Available block devices: {{ item.key }}: model={{ item.value.model | default('N/A') }}, size={{ item.value.size | default('N/A') }}"
+      loop: "{{ ansible_devices | dict2items }}"
+      when: item.key is match('^(sd|nvme|hd|vd)')
+
+  tasks:
+    - name: Debug available variables
+      ansible.builtin.debug:
+        msg: |
+          Available variables:
+          - zfs_pools: {{ zfs_pools | default('NOT_DEFINED') }}
+          - hostname: {{ hostname | default('NOT_DEFINED') }}
+          - ansible_hostname: {{ ansible_hostname | default('NOT_DEFINED') }}
+          - inventory_hostname: {{ inventory_hostname | default('NOT_DEFINED') }}
+
+    - name: Validate ZFS configuration
+      ansible.builtin.assert:
+        that:
+          - zfs_pools is defined
+          - zfs_pools | type_debug == "list"
+          - zfs_pools | length > 0
+        fail_msg: "zfs_pools must be defined in host_vars with at least one pool configuration"
+
+    - name: Process each ZFS pool configuration
+      block:
+        - name: Validate pool configuration
+          ansible.builtin.assert:
+            that:
+              - item.name is defined
+              - item.disks is defined
+              - item.disks | type_debug == "list"
+              - item.disks | length > 0
+            fail_msg: "Pool {{ item.name }} must have 'name' and 'disks' defined"
+          loop: "{{ zfs_pools }}"
+
+        - name: Find disks by model for each pool (including disks in use)
+          ansible.builtin.set_fact:
+            pool_disks: "{{ pool_disks | default({}) }}"
+
+        - name: Set disk for each pool
+          ansible.builtin.set_fact:
+            pool_disks: >-
+              {{
+                pool_disks | combine({
+                  item.name: '/dev/' + (ansible_devices | dict2items |
+                    selectattr('key', 'search', 'sd') |
+                    selectattr('value.model', 'defined') |
+                    selectattr('value.model', 'search', item.disks | join('|')) |
+                    map(attribute='key') |
+                    list | first)
+                })
+              }}
+          loop: "{{ zfs_pools }}"
+
+        - name: Display found disks for each pool
+          ansible.builtin.debug:
+            msg: "Found disks for pool {{ item.name }}: {{ pool_disks[item.name] }}"
+          loop: "{{ zfs_pools }}"
+
+        - name: Debug pool_disks variable
+          ansible.builtin.debug:
+            msg: "pool_disks = {{ pool_disks }}"
+
+        - name: Validate found disks for each pool
+          ansible.builtin.assert:
+            that:
+              - pool_disks[item.name] is defined
+              - pool_disks[item.name] | length > 0
+            fail_msg: "No available disks found for pool {{ item.name }}. All matching disks appear to be in use by existing partitions or LVM. Check disk models in zfs_pools configuration and ensure disks are not already in use."
+          loop: "{{ zfs_pools }}"
+          
+        - name: Check if disk wipe is necessary
+          ansible.builtin.shell: |
+            DISK="{{ disk }}"
+            DISK_BASE="{{ disk | basename }}"
+            POOL_NAME="{{ pool_name }}"
+            
+            echo "=== Checking if disk wipe is necessary for $DISK ==="
+            
+            # Check if disk is already part of the target ZFS pool
+            if zpool status $POOL_NAME 2>/dev/null | grep -q "$DISK\|$DISK_BASE"; then
+                echo "Disk is already part of ZFS pool $POOL_NAME, no wipe needed"
+                echo "wipe_needed=false"
+                exit 0
+            fi
+            
+            # Check if disk has ZFS signatures but not part of our target pool
+            if blkid $DISK 2>/dev/null | grep -q "zfs_member"; then
+                echo "Disk has ZFS signatures but not part of target pool, wipe needed"
+                echo "wipe_needed=true"
+                exit 0
+            fi
+            
+            # Check if disk has other signatures (non-ZFS)
+            if blkid $DISK 2>/dev/null; then
+                echo "Disk has non-ZFS signatures, wipe needed"
+                echo "wipe_needed=true"
+                exit 0
+            fi
+            
+            # Check for EFI partition table corruption
+            if sgdisk -v $DISK 2>&1 | grep -q "corrupt\|invalid\|error"; then
+                echo "Disk has corrupt EFI partition table, wipe needed"
+                echo "wipe_needed=true"
+                exit 0
+            fi
+            
+            # Check if disk has partitions (but not ZFS partitions)
+            PARTITIONS=$(ls /dev/${DISK_BASE}* 2>/dev/null | grep -v "^$DISK$")
+            if [ -n "$PARTITIONS" ]; then
+                echo "Found partitions: $PARTITIONS"
+                # Check if all partitions are ZFS partitions
+                ZFS_PARTITIONS=0
+                TOTAL_PARTITIONS=0
+                for part in $PARTITIONS; do
+                    if [ -b "$part" ]; then
+                        TOTAL_PARTITIONS=$((TOTAL_PARTITIONS + 1))
+                        echo "Checking partition $part:"
+                        blkid "$part" 2>/dev/null || echo "  No blkid info"
+                        if blkid "$part" 2>/dev/null | grep -q "zfs_member"; then
+                            echo "  -> ZFS partition"
+                            ZFS_PARTITIONS=$((ZFS_PARTITIONS + 1))
+                        else
+                            # Check if this is a ZFS reserved partition (usually partition 9)
+                            PART_NUM=$(echo "$part" | sed 's/.*[^0-9]\([0-9]*\)$/\1/')
+                            if [ "$PART_NUM" = "9" ]; then
+                                echo "  -> ZFS reserved partition (ignoring)"
+                                ZFS_PARTITIONS=$((ZFS_PARTITIONS + 1))
+                            else
+                                echo "  -> Non-ZFS partition"
+                            fi
+                        fi
+                    fi
+                done
+                echo "Total partitions: $TOTAL_PARTITIONS, ZFS partitions: $ZFS_PARTITIONS"
+                
+                if [ $TOTAL_PARTITIONS -gt 0 ] && [ $ZFS_PARTITIONS -eq $TOTAL_PARTITIONS ]; then
+                    echo "Disk has only ZFS partitions, checking if part of target pool"
+                    echo "Checking zpool status for pool: $POOL_NAME"
+                    zpool status $POOL_NAME 2>/dev/null || echo "Pool $POOL_NAME does not exist"
+                    echo "Looking for disk: $DISK or $DISK_BASE"
+                    if zpool status $POOL_NAME 2>/dev/null | grep -q "$DISK\|$DISK_BASE"; then
+                        echo "ZFS partitions are part of target pool, no wipe needed"
+                        echo "wipe_needed=false"
+                        exit 0
+                    else
+                        echo "ZFS partitions not part of target pool, wipe needed"
+                        echo "wipe_needed=true"
+                        exit 0
+                    fi
+                else
+                    echo "Disk has non-ZFS partitions, wipe needed"
+                    echo "wipe_needed=true"
+                    exit 0
+                fi
+            fi
+            
+            # Check if disk is part of LVM
+            if pvs $DISK 2>/dev/null; then
+                echo "Disk is part of LVM, wipe needed"
+                echo "wipe_needed=true"
+                exit 0
+            fi
+            
+            # Check if disk has any mounted filesystems
+            if grep -q "$DISK" /proc/mounts; then
+                echo "Disk has mounted filesystems, wipe needed"
+                echo "wipe_needed=true"
+                exit 0
+            fi
+            
+            echo "Disk appears clean, no wipe needed"
+            echo "wipe_needed=false"
+          register: wipe_check
+          loop: "{{ pool_disks | dict2items }}"
+          vars:
+            disk: "{{ item.value }}"
+            pool_name: "{{ item.key }}"
+          changed_when: false
+
+        - name: Warning - This will destroy all data on the selected disks
+          ansible.builtin.pause:
+            prompt: |
+              WARNING: This playbook will DESTROY ALL DATA on the following disks:
+              {% for pool_name, disk in pool_disks.items() %}
+              - Pool {{ pool_name }}: {{ disk }}
+              {% endfor %}
+              
+              This includes any existing partitions, LVM volumes, and filesystems.
+              Are you sure you want to continue? Type 'yes' to proceed.
+            echo: false
+          when: wipe_check.results | map(attribute='stdout_lines') | map('last') | select('match', 'wipe_needed=true') | list | length > 0
+
+
+        - name: Display wipe check results
+          ansible.builtin.debug:
+            msg: "Disk {{ item.item.value }} - Wipe needed: {{ item.stdout_lines[-1] }}"
+          loop: "{{ wipe_check.results }}"
+
+        - name: Force wipe disk signatures before ZFS pool creation (only if necessary)
+          ansible.builtin.shell: |
+            set -e
+            DISK="{{ disk }}"
+            DISK_BASE="{{ disk | basename }}"
+            
+            echo "=== Starting comprehensive disk wipe for $DISK ==="
+            
+            # 1. Find and terminate all processes using the disk
+            echo "1. Finding processes using $DISK..."
+            
+            # Find processes using the disk directly
+            PIDS_DIRECT=$(lsof +D $DISK 2>/dev/null | awk 'NR>1 {print $2}' | sort -u | tr '\n' ' ')
+            if [ ! -z "$PIDS_DIRECT" ]; then
+                echo "   Found processes using disk directly: $PIDS_DIRECT"
+                echo "$PIDS_DIRECT" | xargs -r kill -TERM || true
+                sleep 2
+                echo "$PIDS_DIRECT" | xargs -r kill -KILL || true
+            fi
+            
+            # Find processes using any partition of the disk
+            for PART in /dev/${DISK_BASE}*; do
+                if [ -b "$PART" ] && [ "$PART" != "$DISK" ]; then
+                    echo "   Checking partition $PART..."
+                    PIDS_PART=$(lsof +D $PART 2>/dev/null | awk 'NR>1 {print $2}' | sort -u | tr '\n' ' ')
+                    if [ ! -z "$PIDS_PART" ]; then
+                        echo "   Found processes using partition $PART: $PIDS_PART"
+                        echo "$PIDS_PART" | xargs -r kill -TERM || true
+                        sleep 2
+                        echo "$PIDS_PART" | xargs -r kill -KILL || true
+                    fi
+                fi
+            done
+            
+            # 2. Unmount all filesystems on the disk and its partitions
+            echo "2. Unmounting all filesystems..."
+            
+            # Unmount by device path
+            umount -f $DISK* 2>/dev/null || true
+            
+            # Unmount by mount point (in case of bind mounts)
+            grep "$DISK" /proc/mounts | awk '{print $2}' | sort -r | xargs -r umount -f || true
+            
+            # Unmount by filesystem type
+            for PART in /dev/${DISK_BASE}*; do
+                if [ -b "$PART" ]; then
+                    umount -f $PART 2>/dev/null || true
+                fi
+            done
+            
+            # 3. Remove LVM components
+            echo "3. Removing LVM components..."
+            
+            # Deactivate any LVs on the disk
+            for PART in /dev/${DISK_BASE}*; do
+                if [ -b "$PART" ]; then
+                    # Check if this partition is a PV
+                    if pvs $PART 2>/dev/null; then
+                        echo "   Deactivating LVs on $PART..."
+                        vgs --noheadings -o vg_name $PART 2>/dev/null | xargs -r vgchange -an || true
+                        pvremove -f $PART 2>/dev/null || true
+                    fi
+                fi
+            done
+            
+            # 4. Remove any remaining device mappings
+            echo "4. Removing device mappings..."
+            dmsetup remove_all || true
+            
+            # 5. Sync and wait
+            echo "5. Syncing filesystem..."
+            sync
+            sleep 2
+            
+            # 6. Wipe the disk completely
+            echo "6. Wiping disk signatures..."
+            wipefs -a $DISK || true
+            
+            # 6.1. Specifically handle EFI partition tables
+            echo "6.1. Handling EFI partition tables..."
+            # Clear GPT partition table if it exists
+            sgdisk --zap-all $DISK 2>/dev/null || true
+            # Clear MBR partition table if it exists  
+            dd if=/dev/zero of=$DISK bs=512 count=1 2>/dev/null || true
+            # Clear any remaining partition table signatures
+            wipefs -a $DISK 2>/dev/null || true
+            
+            # 7. Zero out the beginning of the disk
+            echo "7. Zeroing disk sectors..."
+            dd if=/dev/zero of=$DISK bs=1M count=100 2>/dev/null || true
+            sync
+            
+            # 8. Verify the disk is clean
+            echo "8. Verifying disk is clean..."
+            if [ -z "$(blkid $DISK 2>/dev/null)" ]; then
+                echo "✅ Disk $DISK successfully wiped and verified clean"
+            else
+                echo "❌ Warning: Disk $DISK still has signatures"
+                blkid $DISK || true
+                exit 1
+            fi
+            
+            echo "=== Disk wipe completed for $DISK ==="
+          register: disk_wipes
+          loop: "{{ wipe_check.results }}"
+          vars:
+            disk: "{{ item.item.value }}"
+          when: item.stdout_lines[-1] == "wipe_needed=true"
+
+        - name: Debug pool_disks before ZFS creation
+          ansible.builtin.debug:
+            msg: |
+              Pool: {{ item.name }}
+              Disk: {{ pool_disks[item.name] | default('UNDEFINED') }}
+              Pool config: {{ item.name }}
+          loop: "{{ zfs_pools }}"
+
+        - name: Debug ZFS pool creation parameters
+          ansible.builtin.debug:
+            msg: |
+              Pool: {{ item.name }}
+              Disk: {{ pool_disks[item.name] }}
+              VDEVs: {{ [pool_disks[item.name]] }}
+              Pool properties: ashift={{ item.ashift | default(zfs_default_ashift) }}
+              FS properties: compression={{ item.compression | default(zfs_default_compression) }}
+          loop: "{{ zfs_pools }}"
+          when: pool_disks[item.name] is defined and pool_disks[item.name] != "" and pool_disks[item.name] != "None"
+
+        - name: Create or update ZFS pools
+          community.general.zpool:
+            name: "{{ item.name }}"
+            state: present
+            vdevs:
+              - disks: "{{ [pool_disks[item.name]] }}"
+            pool_properties:
+              ashift: "{{ item.ashift | default(zfs_default_ashift) }}"
+            filesystem_properties:
+              compression: "{{ item.compression | default(zfs_default_compression) }}"
+              checksum: "{{ item.checksum | default(zfs_default_checksum) }}"
+              atime: "{{ item.atime | default(zfs_default_atime) }}"
+              sync: "{{ item.sync | default(zfs_default_sync) }}"
+          loop: "{{ zfs_pools }}"
+          when: pool_disks[item.name] is defined and pool_disks[item.name] != "" and pool_disks[item.name] != "None"
+
+        - name: Create datasets for pools (with quota and reservation)
+          community.general.zfs:
+            name: "{{ item.0.name }}/{{ item.1.name }}"
+            state: present
+            extra_zfs_properties:
+              compression: "{{ item.1.compression | default(item.0.compression | default(zfs_default_compression)) }}"
+              mountpoint: "{{ item.1.mountpoint | default('') }}"
+              quota: "{{ item.1.quota }}"
+              reservation: "{{ item.1.reservation }}"
+          loop: "{{ zfs_pools | subelements('datasets', skip_missing=True) }}"
+          when: 
+            - item.0.datasets is defined
+            - item.1.quota | default('') | length > 0
+            - item.1.reservation | default('') | length > 0
+
+        - name: Create datasets for pools (with quota only)
+          community.general.zfs:
+            name: "{{ item.0.name }}/{{ item.1.name }}"
+            state: present
+            extra_zfs_properties:
+              compression: "{{ item.1.compression | default(item.0.compression | default(zfs_default_compression)) }}"
+              mountpoint: "{{ item.1.mountpoint | default('') }}"
+              quota: "{{ item.1.quota }}"
+          loop: "{{ zfs_pools | subelements('datasets', skip_missing=True) }}"
+          when: 
+            - item.0.datasets is defined
+            - item.1.quota | default('') | length > 0
+            - item.1.reservation | default('') | length == 0
+
+        - name: Create datasets for pools (with reservation only)
+          community.general.zfs:
+            name: "{{ item.0.name }}/{{ item.1.name }}"
+            state: present
+            extra_zfs_properties:
+              compression: "{{ item.1.compression | default(item.0.compression | default(zfs_default_compression)) }}"
+              mountpoint: "{{ item.1.mountpoint | default('') }}"
+              reservation: "{{ item.1.reservation }}"
+          loop: "{{ zfs_pools | subelements('datasets', skip_missing=True) }}"
+          when: 
+            - item.0.datasets is defined
+            - item.1.quota | default('') | length == 0
+            - item.1.reservation | default('') | length > 0
+
+        - name: Create datasets for pools (no quota or reservation)
+          community.general.zfs:
+            name: "{{ item.0.name }}/{{ item.1.name }}"
+            state: present
+            extra_zfs_properties:
+              compression: "{{ item.1.compression | default(item.0.compression | default(zfs_default_compression)) }}"
+              mountpoint: "{{ item.1.mountpoint | default('') }}"
+          loop: "{{ zfs_pools | subelements('datasets', skip_missing=True) }}"
+          when: 
+            - item.0.datasets is defined
+            - item.1.quota | default('') | length == 0
+            - item.1.reservation | default('') | length == 0
+
+        - name: Get pool status for verification
+          ansible.builtin.command: zpool status {{ item.name }}
+          register: pool_status
+          changed_when: false
+          loop: "{{ zfs_pools }}"
+
+        - name: Show pool status
+          ansible.builtin.debug:
+            msg: "Pool {{ item.item.name }} status: {{ item.stdout_lines | default('Available') }}"
+          loop: "{{ pool_status.results }}"
+
+  post_tasks:
+    - name: Display final ZFS pool information
+      ansible.builtin.command: zpool status {{ item.name }}
+      register: final_pools
+      changed_when: false
+      loop: "{{ zfs_pools }}"
+
+    - name: Show final ZFS pools
+      ansible.builtin.debug:
+        msg: "Final ZFS Pools: {{ final_pools.results | map(attribute='item') | list }}"
+    - name: Display final ZFS filesystem information
+      ansible.builtin.command: zfs list {{ item.0.name }}/{{ item.1.name }}
+      register: final_filesystems
+      changed_when: false
+      loop: "{{ zfs_pools | subelements('datasets', skip_missing=True) }}"
+      when: item.0.datasets is defined
+
+    - name: Show final ZFS filesystems
+      ansible.builtin.debug:
+        msg: "Final ZFS Filesystems: {{ final_filesystems.results | map(attribute='item') | list }}"
+
+  handlers:
+    - name: restart pveproxy
+      ansible.builtin.systemd:
+        name: pveproxy
+        state: restarted
+
+    - name: restart pvedaemon
+      ansible.builtin.systemd:
+        name: pvedaemon
+        state: restarted
+
+# Proxmox Storage Pool Configuration
+- name: Configure Proxmox Storage Pools for ZFS Datasets
+  hosts: pve
+  become: true
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../host_vars/{{ inventory_hostname }}/main.yaml"
+    - "{{ playbook_dir }}/../host_vars/{{ inventory_hostname }}/secrets.yaml"
+  
+  vars:
+    proxmox_api_host: "{{ ansible_host }}"
+    proxmox_api_user: "root@pve"
+    proxmox_api_password: "{{ proxmox_password | default(omit) }}"
+    proxmox_validate_certs: false
+  tasks:
+    - name: Debug Proxmox variables
+      ansible.builtin.debug:
+        msg: |
+          Proxmox variables:
+          - proxmox_password: {{ proxmox_password | default('NOT_DEFINED') }}
+          - proxmox_user: {{ proxmox_user | default('NOT_DEFINED') }}
+          - proxmox_api_host: {{ proxmox_api_host | default('NOT_DEFINED') }}
+
+    - name: Initialize Proxmox storage results variable
+      ansible.builtin.set_fact:
+        proxmox_storage_results:
+          results: []
+
+    - name: Check Proxmox password configuration
+      ansible.builtin.fail:
+        msg: |
+          Proxmox password is not properly configured!
+          
+          Current value: {{ proxmox_password | default('NOT_DEFINED') }}
+          
+          To fix this, update the password in your host_vars or group_vars:
+          Example in host_vars/pve02/secrets.sops.yaml:
+            proxmox_password: "your-actual-proxmox-password"
+          
+          The password must be set to your actual Proxmox root password, not the placeholder value.
+      when: 
+        - proxmox_password is not defined or proxmox_password | default('') | length == 0 or proxmox_password == "your-proxmox-password"
+
+    - name: Validate Proxmox storage configuration
+      ansible.builtin.assert:
+        that:
+          - proxmox_storage_pools is defined
+          - proxmox_storage_pools | type_debug == "dict"
+          - proxmox_storage_pools | length > 0
+        fail_msg: "proxmox_storage_pools must be defined in host_vars with at least one storage pool configuration"
+
+    - name: Check if Proxmox storage pools already exist
+      ansible.builtin.shell: pvesm status | grep -q "{{ item.key }}"
+      loop: "{{ proxmox_storage_pools | dict2items }}"
+      register: storage_exists_check
+      failed_when: false
+      changed_when: false
+
+    - name: existing storage list
+      ansible.builtin.set_fact:
+        existing_storage_list: "{{ existing_storage_list | default([]) + [item.item.key] }}"
+      loop: "{{ storage_exists_check.results }}"
+      when: item.rc == 0
+    
+    - name: Display existing storage list
+      ansible.builtin.debug:
+        msg: "Existing storage list: {{ existing_storage_list }}"
+    
+    # TODO : use ansible module instead of shell
+    - name: Create Proxmox storage pools for ZFS datasets using pvesm
+      ansible.builtin.shell: |
+        {% if item.value.type == 'zfs' %}
+        pvesm add zfspool {{ item.key }} \
+          -pool {{ item.value.pool }} \
+          -content {{ item.value.content | default('') }} \
+          -nodes {{ item.value.nodes | default('') }} \
+          -disable {{ item.value.disable | default(false) | lower }}
+        {% else %}
+        {% set pool_name = item.value.pool.split('/')[0] %}
+        {% set dataset_name = item.value.pool.split('/')[1] %}
+        {% set pool_obj = (zfs_pools | selectattr('name', 'equalto', pool_name) | list | first) %}
+        {% set dataset_obj = (pool_obj.datasets | selectattr('name', 'equalto', dataset_name) | list | first) %}
+        pvesm add dir {{ item.key }} \
+          -path {{ dataset_obj.mountpoint }} \
+          -content {{ item.value.content | default('') }} \
+          -nodes {{ item.value.nodes | default('') }} \
+          -disable {{ item.value.disable | default(false) | lower }}
+        {% endif %}
+      loop: "{{ proxmox_storage_pools | dict2items }}"
+      when: 
+        - item.key not in existing_storage_list
+        - (item.value.type == "zfs") or (item.value.type == "dir" and item.value.pool is defined)
+      register: proxmox_storage_results
+
+    - name: Display Proxmox storage creation results
+      ansible.builtin.debug:
+        msg: |
+          Storage pool creation results:
+          {% for result in proxmox_storage_results.results %}
+          - Pool: {{ result.item.item.key | default('unknown') }}
+            Status: {{ 'SUCCESS' if not (result.failed | default(false)) else 'FAILED' }}
+            Message: {{ result.stdout | default('No message') }}
+            Changed: {{ result.changed | default(false) }}
+          {% endfor %}
+      when: 
+        - proxmox_storage_results.results is defined
+        - proxmox_storage_results.results | length > 0
+
+    - name: Display Proxmox storage creation skipped message
+      ansible.builtin.debug:
+        msg: "Proxmox storage creation was skipped - check if proxmox_password is defined and valid"
+      when: 
+        - proxmox_storage_results.results is defined
+        - proxmox_storage_results.results | length == 0
+        - proxmox_password is not defined
+
+  post_tasks:
+    - name: Display current Proxmox storage status
+      ansible.builtin.shell: pvesm status
+      register: final_storage_status
+      changed_when: false
+
+    - name: Show final Proxmox storage status
+      ansible.builtin.debug:
+        msg: "Final Proxmox storage status:\n{{ final_storage_status.stdout | default('Storage status not available') }}"
+        
+    - name: Display configured Proxmox storage pools
+      ansible.builtin.debug:
+        msg: "Configured Proxmox storage pools: {{ proxmox_storage_pools | default({}) }}"

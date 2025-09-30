@@ -1,0 +1,36 @@
+2025-09-29 09:41:51,339 p=2267767 u=skorll n=ansible | ERROR! the playbook: 00-post-install-pve.yml could not be found
+2025-09-29 09:42:31,321 p=2268350 u=skorll n=ansible | [WARNING]: Could not match supplied host pattern, ignoring: pve
+
+2025-09-29 09:42:31,321 p=2268350 u=skorll n=ansible | PLAY [Proxmox VE Post-Install Routines (Ansible, shell-minimized)] *************
+2025-09-29 09:42:31,322 p=2268350 u=skorll n=ansible | skipping: no hosts matched
+2025-09-29 09:42:31,322 p=2268350 u=skorll n=ansible | PLAY RECAP *********************************************************************
+2025-09-29 09:42:42,031 p=2268521 u=skorll n=ansible | [WARNING]: Could not match supplied host pattern, ignoring: pve
+
+2025-09-29 09:42:42,032 p=2268521 u=skorll n=ansible | PLAY [Proxmox VE Post-Install Routines (Ansible, shell-minimized)] *************
+2025-09-29 09:42:42,032 p=2268521 u=skorll n=ansible | skipping: no hosts matched
+2025-09-29 09:42:42,032 p=2268521 u=skorll n=ansible | PLAY RECAP *********************************************************************
+2025-09-29 09:42:50,789 p=2268614 u=skorll n=ansible | [WARNING]: Could not match supplied host pattern, ignoring: pve
+
+2025-09-29 09:42:50,789 p=2268614 u=skorll n=ansible | PLAY [Proxmox VE Post-Install Routines (Ansible, shell-minimized)] *************
+2025-09-29 09:42:50,789 p=2268614 u=skorll n=ansible | skipping: no hosts matched
+2025-09-29 09:42:50,789 p=2268614 u=skorll n=ansible | PLAY RECAP *********************************************************************
+2025-09-29 09:43:01,645 p=2268722 u=skorll n=ansible | [WARNING]: Could not match supplied host pattern, ignoring: pve
+
+2025-09-29 09:43:01,646 p=2268722 u=skorll n=ansible | PLAY [Proxmox VE Post-Install Routines (Ansible, shell-minimized)] *************
+2025-09-29 09:43:01,646 p=2268722 u=skorll n=ansible | skipping: no hosts matched
+2025-09-29 09:43:01,646 p=2268722 u=skorll n=ansible | PLAY RECAP *********************************************************************
+2025-09-29 09:43:10,929 p=2269012 u=skorll n=ansible | [WARNING]: Could not match supplied host pattern, ignoring: pve
+
+2025-09-29 09:43:10,929 p=2269012 u=skorll n=ansible | PLAY [Proxmox VE Post-Install Routines (Ansible, shell-minimized)] *************
+2025-09-29 09:43:10,929 p=2269012 u=skorll n=ansible | skipping: no hosts matched
+2025-09-29 09:43:10,929 p=2269012 u=skorll n=ansible | PLAY RECAP *********************************************************************
+2025-09-29 09:43:20,246 p=2269127 u=skorll n=ansible | [WARNING]: Could not match supplied host pattern, ignoring: pve
+
+2025-09-29 09:43:20,246 p=2269127 u=skorll n=ansible | PLAY [Proxmox VE Post-Install Routines (Ansible, shell-minimized)] *************
+2025-09-29 09:43:20,246 p=2269127 u=skorll n=ansible | skipping: no hosts matched
+2025-09-29 09:43:20,247 p=2269127 u=skorll n=ansible | PLAY RECAP *********************************************************************
+2025-09-29 09:43:34,040 p=2269345 u=skorll n=ansible | [WARNING]: Could not match supplied host pattern, ignoring: pve
+
+2025-09-29 09:43:34,040 p=2269345 u=skorll n=ansible | PLAY [Proxmox VE Post-Install Routines (Ansible, shell-minimized)] *************
+2025-09-29 09:43:34,040 p=2269345 u=skorll n=ansible | skipping: no hosts matched
+2025-09-29 09:43:34,040 p=2269345 u=skorll n=ansible | PLAY RECAP *********************************************************************

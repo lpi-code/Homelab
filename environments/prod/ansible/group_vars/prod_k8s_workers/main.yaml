@@ -1,0 +1,6 @@
+---
+# Production Kubernetes Workers group variables
+
+cluster_role: worker
+cluster_name: prod-cluster
+node_type: talos

@@ -1,0 +1,8 @@
+---
+# Proxmox VE group variables
+
+cluster_role: pve
+
+
+
+

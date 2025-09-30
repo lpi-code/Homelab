@@ -1,0 +1,64 @@
+---
+domain: "homelab.local"
+fqdn: "pve02.homelab.local"
+mailto: "admin@homelab.local"
+
+proxmox_validate_certs: false
+proxmox:
+  # Repository Configuration
+  repositories:
+    correct_sources: true
+    disable_pve_enterprise: true
+    enable_pve_no_subscription: true
+    correct_ceph_sources_8: true
+    add_pvetest_disabled_8: true
+    
+    # 9.x specific
+    migrate_to_deb822_9: true
+    disable_legacy_sources_9: true
+    pve_enterprise_state_9: "disabled"
+    pve_no_subscription_state_9: "enabled"
+    ceph_state_9: "enabled"
+    add_pvetest_disabled_9: true
+  
+  # Feature Configuration
+  disable_subscription_nag: true
+  enable_ha: false
+  disable_ha: false
+  disable_corosync_if_disabling_ha: true
+  
+  # Update Configuration
+  do_update: true
+  reboot_after: false
+
+
+
+# Proxmox Storage Pools Configuration
+proxmox_default_storage_pool: "storage-vms"
+proxmox_storage_pools:
+  storage-vms:
+    type: "zfs"
+    content: "images,rootdir"
+    nodes: "{{ hostname }}"
+    disable: false
+    shared: false
+    pool: "storage/vms"
+  storage-backups:
+    type: "dir"
+    content: "backup"
+    nodes: "{{ hostname }}"
+    disable: false
+    shared: false
+    pool: "storage/backups"
+  storage-isos:
+    type: "dir"
+    content: "iso"
+    nodes: "{{ hostname }}"
+    disable: false
+    shared: false
+    pool: "storage/isos"
+
+# Will be imported from secrets.sops.yaml
+# proxmox_user: "{{ proxmox_user }}"
+# proxmox_password: "{{ proxmox_password }}"
+# proxmox_role_name: ""
