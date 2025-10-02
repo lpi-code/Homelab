@@ -15,6 +15,20 @@
     tunnel_pid_file: "/tmp/terraform_tunnel_{{ terraform_vars.tunnel_local_port | default(5800) }}.pid"
   
   pre_tasks:
+    - name: Check if VM templates exist
+      command: qm list --full
+      register: available_templates
+      changed_when: false
+      
+    - name: Extract template names
+      set_fact:
+        available_template_names: "{{ available_templates.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify required templates are available
+      fail:
+        msg: "Required template '{{ terraform_vars.vm_template | default('talos-template') }}' not found. Available templates: {{ available_template_names }}"
+      when: (terraform_vars.vm_template | default('talos-template')) not in available_template_names
+
     - name: Check if storage pool exists
       command: pvesm status
       register: storage_status

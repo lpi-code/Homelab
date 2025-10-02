@@ -96,6 +96,13 @@ variable "vm_disk_size_override" {
   default     = null
 }
 
+# Template configuration
+variable "vm_template_override" {
+  description = "Override VM template from Ansible (must be Packer-created template)"
+  type        = string
+  default     = null
+}
+
 # Tags
 variable "additional_tags" {
   description = "Additional tags to apply to resources"
