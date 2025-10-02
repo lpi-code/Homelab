@@ -1,0 +1,365 @@
+---
+- name: Deploy Talos Kubernetes Cluster with Terraform
+  hosts: dev_talos
+  become: yes
+  gather_facts: no
+  collections:
+    - community.general
+  
+  vars:
+    token_name: "{{ terraform_vars.token_name | default('terraform-talos-token') }}"
+    # Tunnel configuration
+    tunnel_local_port: "{{ terraform_vars.tunnel_local_port | default(5801) }}"
+    tunnel_remote_host: "{{ inventory_hostname }}"
+    tunnel_remote_port: "{{ terraform_vars.tunnel_remote_port | default(8006) }}"
+    tunnel_pid_file: "/tmp/terraform_talos_tunnel_{{ terraform_vars.tunnel_local_port | default(5801) }}.pid"
+    
+    # OpenWrt configuration - read from group_vars
+    openwrt_image_type: "generic-ext4-combined-efi"
+    openwrt_filename: "openwrt-{{ openwrt_version | default('23.05.5') }}-x86-64-efi.img"
+    iso_storage_path: "{{ proxmox_default_iso_path | default('/var/lib/vz/template/iso') }}"
+    
+    # Terraform variables - define all required variables here instead of using tfvars
+    terraform_variables:
+      # Proxmox configuration
+      proxmox_host: "{{ inventory_hostname }}"
+      proxmox_node: "{{ proxmox_node | default('pve02') }}"
+      proxmox_user: "{{ proxmox_user }}"
+      proxmox_password: "{{ proxmox_password }}"
+      proxmox_tls_insecure: "{{ proxmox_tls_insecure | default(true) }}"
+      
+      # Cluster configuration
+      cluster_name: "{{ cluster_name | default('talos-cluster') }}"
+      environment: "{{ environment | default('dev') }}"
+      
+      # VM configuration
+      control_plane_count: "{{ control_plane_count | default(3) }}"
+      worker_count: "{{ worker_count | default(3) }}"
+      
+      # VM IDs - use different IDs to avoid conflicts with existing VMs
+      control_plane_vm_ids: "{{ control_plane_vm_ids | default([301, 302, 303]) }}"
+      worker_vm_ids: "{{ worker_vm_ids | default([401, 402, 403]) }}"
+      nat_gateway_vm_id: "{{ nat_gateway_vm_id | default(300) }}"
+      
+      # VM specifications
+      control_plane_memory: "{{ control_plane_memory | default(4096) }}"
+      control_plane_cores: "{{ control_plane_cores | default(2) }}"
+      worker_memory: "{{ worker_memory | default(8192) }}"
+      worker_cores: "{{ worker_cores | default(4) }}"
+      nat_gateway_memory: "{{ nat_gateway_memory | default(1024) }}"
+      nat_gateway_cores: "{{ nat_gateway_cores | default(1) }}"
+      
+      # Storage configuration
+      vm_disk_size: "{{ vm_disk_size | default('32G') }}"
+      storage_pool: "{{ proxmox_default_storage_pool }}"
+      
+      # Network configuration
+      talos_network_cidr: "{{ talos_network_cidr | default('10.0.0.0/16') }}"
+      nat_gateway_enabled: "{{ enable_nat_gateway | default(false) }}"
+      
+      # Talos configuration
+      talos_version: "{{ talos_version | default('v1.7.0') }}"
+      kubernetes_version: "{{ kubernetes_version | default('v1.29.0') }}"
+      
+      # SSH configuration
+      ssh_public_key: "{{ ssh_public_key }}"
+      
+      # OpenWrt configuration
+      openwrt_filename: "{{ openwrt_filename }}"
+      
+      # Tunnel configuration
+      tunnel_local_port: "{{ tunnel_local_port }}"
+  
+
+  pre_tasks:
+    # Prepare OpenWrt image if NAT gateway is enabled
+    - name: Check if NAT gateway is enabled
+      set_fact:
+        nat_gateway_enabled: "{{ enable_nat_gateway | default(false) | bool }}"
+    
+    - name: Prepare OpenWrt image for NAT gateway
+      when: nat_gateway_enabled
+      block:
+        - name: Check if OpenWrt image already exists
+          stat:
+            path: "{{ iso_storage_path }}/{{ openwrt_filename }}"
+          register: openwrt_image_stat
+        
+        - name: Download and prepare OpenWrt image
+          when: not openwrt_image_stat.stat.exists
+          block:
+            - name: Download OpenWrt image
+              get_url:
+                url: "https://downloads.openwrt.org/releases/{{ openwrt_version | default('23.05.5') }}/targets/x86/64/openwrt-{{ openwrt_version | default('23.05.5') }}-x86-64-{{ openwrt_image_type }}.img.gz"
+                dest: "/tmp/openwrt-temp.img.gz"
+                mode: '0644'
+                timeout: 300
+            
+            - name: Decompress OpenWrt image
+              command: >
+                gunzip -c /tmp/openwrt-temp.img.gz > "{{ iso_storage_path }}/{{ openwrt_filename }}"
+              args:
+                creates: "{{ iso_storage_path }}/{{ openwrt_filename }}"
+            
+            - name: Set proper permissions
+              file:
+                path: "{{ iso_storage_path }}/{{ openwrt_filename }}"
+                mode: '0644'
+                owner: root
+                group: root
+            
+            - name: Clean up temp file
+              file:
+                path: "/tmp/openwrt-temp.img.gz"
+                state: absent
+            
+            - name: Refresh Proxmox ISO storage
+              command: pvesm scan iso local
+              changed_when: false
+              ignore_errors: yes
+        
+        - name: Display OpenWrt image status
+          debug:
+            msg: "✅ OpenWrt image ready: {{ iso_storage_path }}/{{ openwrt_filename }}"
+
+    - name: Check if storage pool exists
+      command: pvesm status
+      register: storage_status
+      changed_when: false
+      
+    - name: Extract available storage pool names
+      set_fact:
+        available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify storage pool is available
+      fail:
+        msg: "Storage pool '{{ proxmox_default_storage_pool }}' not found. Available pools: {{ available_storage_pools }}"
+      when: proxmox_default_storage_pool is not defined or proxmox_default_storage_pool not in available_storage_pools
+
+    - name: Check if terraform directory exists
+      stat:
+        path: "{{ terraform_dir }}"
+      register: terraform_dir_stat
+      changed_when: false
+      delegate_to: localhost
+      become: no
+    
+    - name: Fail if terraform directory does not exist
+      fail:
+        msg: "Terraform directory does not exist"
+      when: not terraform_dir_stat.stat.exists
+      delegate_to: localhost
+      become: no
+
+    - name: Check if OpenWrt image already exists in ISO storage
+      stat:
+        path: "{{ iso_storage_path }}/{{ openwrt_filename }}"
+      register: openwrt_image_stat
+    
+    - name: Display status if image already exists
+      debug:
+        msg: "✅ OpenWrt image already exists at {{ iso_storage_path }}/{{ openwrt_filename }}"
+      when: openwrt_image_stat.stat.exists
+    
+    - name: Download and prepare OpenWrt image
+      when: not openwrt_image_stat.stat.exists
+      block:
+        - name: Download OpenWrt image (compressed)
+          get_url:
+            url: "{{ openwrt_url }}"
+            dest: "{{ temp_download_path }}"
+            mode: '0644'
+            timeout: 300
+          register: download_result
+        
+        - name: Decompress OpenWrt image
+          unarchive:
+            src: "{{ temp_download_path }}"
+            dest: "{{ iso_storage_path }}/"
+            remote_src: yes
+            creates: "{{ iso_storage_path }}/{{ openwrt_filename }}"
+            extra_opts: [--no-same-owner]
+          register: decompress_result
+        - name: Set proper permissions on decompressed image
+          file:
+            path: "{{ iso_storage_path }}/{{ openwrt_filename }}"
+            mode: '0644'
+            owner: root
+            group: root
+        
+        - name: Clean up temporary compressed file
+          file:
+            path: "{{ temp_download_path }}"
+            state: absent
+        
+        - name: Verify decompressed image exists and has content
+          stat:
+            path: "{{ iso_storage_path }}/{{ openwrt_filename }}"
+          register: final_image_stat
+        
+        - name: Display final image information
+          debug:
+            msg:
+              - "✅ OpenWrt image prepared successfully!"
+              - "📁 Location: {{ iso_storage_path }}/{{ openwrt_filename }}"
+              - "📊 Size: {{ (final_image_stat.stat.size / 1024 / 1024) | round(2) }} MB"
+        
+        - name: Fail if image is too small (likely corrupted)
+          fail:
+            msg: "❌ Downloaded image appears corrupted (size: {{ final_image_stat.stat.size }} bytes)"
+          when: final_image_stat.stat.size < 10000000  # Less than 10MB is suspicious
+
+    - name: Display completion message
+      debug:
+        msg:
+          - "🎉 OpenWrt image preparation complete!"
+          - "🌐 Image: {{ openwrt_filename }}"
+          - "📍 Version: {{ openwrt_version }}"
+          - "✅ Ready for Terraform deployment"
+
+
+
+    # SSH Tunnel Setup for Terraform Proxy
+    - name: Check if tunnel port is available
+      wait_for:
+        port: "{{ tunnel_local_port }}"
+        state: stopped
+        timeout: 1
+      register: tunnel_port_check
+      delegate_to: localhost
+      become: no
+      ignore_errors: true
+      changed_when: false
+      
+    - name: Fail if tunnel port is already in use
+      fail:
+        msg: "Port {{ tunnel_local_port }} is already in use. Please choose a different port or stop the service using it."
+      when: tunnel_port_check.failed
+      delegate_to: localhost
+      become: no
+      
+    - name: Create SOCKS proxy tunnel to PVE node
+      shell: |
+        ssh -f -N -D {{ tunnel_local_port }} {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+        echo $! > {{ tunnel_pid_file }}
+      register: tunnel_create_result
+      delegate_to: localhost
+      become: no
+
+    - name: Wait for tunnel to be ready
+      wait_for:
+        port: "{{ tunnel_local_port }}"
+        host: "127.0.0.1"
+        timeout: 10
+      delegate_to: localhost
+      become: no
+      
+    - name: Remove any existing .terraformrc file
+      file:
+        path: "{{ terraform_dir }}/.terraformrc"
+        state: absent
+      delegate_to: localhost
+      become: no
+      ignore_errors: true
+      changed_when: false
+
+    - name: Test SOCKS tunnel connectivity
+      shell: |
+        curl -s --socks5 127.0.0.1:{{ tunnel_local_port }} https://{{ inventory_hostname }}:8006/api2/json/version
+      register: tunnel_test
+      delegate_to: localhost
+      become: no
+      ignore_errors: true
+      changed_when: false
+      
+    - name: Display tunnel test results
+      debug:
+        msg: 
+          - "SOCKS tunnel test result: {{ tunnel_test.stdout if tunnel_test.stdout is defined else 'Failed' }}"
+      delegate_to: localhost
+      become: no
+      when: ansible_check_mode == true
+
+  tasks:
+    # Terraform execution tasks using community.general.terraform module with OpenTofu
+    - name: Apply the Talos Cluster Terraform configuration
+      block:
+        - name: Initialize Terraform with OpenTofu
+          community.general.terraform:
+            project_path: "{{ terraform_dir }}"
+            force_init: true
+            binary_path: "/usr/bin/tofu"
+            workspace: "default"
+            backend_config: {}
+            variables: "{{ terraform_variables }}"
+          environment:
+            http_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            https_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            HTTP_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            HTTPS_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            no_proxy: "localhost,127.0.0.1,registry.opentofu.org"
+            NO_PROXY: "localhost,127.0.0.1,registry.opentofu.org"
+            # Proxmox provider configuration
+            PROXMOX_VE_ENDPOINT: "https://{{ inventory_hostname }}:8006/"
+            PROXMOX_VE_USERNAME: "{{ proxmox_user }}@pve"
+            PROXMOX_VE_PASSWORD: "{{ proxmox_password }}"
+            PROXMOX_VE_INSECURE: "true"
+          register: terraform_init_result
+          delegate_to: localhost
+          become: no
+
+        - name: Apply Terraform configuration
+          community.general.terraform:
+            project_path: "{{ terraform_dir }}"
+            binary_path: "/usr/bin/tofu"
+            workspace: "default"
+            variables: "{{ terraform_variables }}"
+          environment:
+            http_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            https_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            HTTP_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            HTTPS_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            no_proxy: "localhost,127.0.0.1,registry.opentofu.org"
+            NO_PROXY: "localhost,127.0.0.1,registry.opentofu.org"
+            # Proxmox provider configuration
+            PROXMOX_VE_ENDPOINT: "https://{{ inventory_hostname }}:8006/"
+            PROXMOX_VE_USERNAME: "{{ proxmox_user }}@pam"
+            PROXMOX_VE_PASSWORD: "{{ proxmox_password }}"
+            PROXMOX_VE_INSECURE: "true"
+          register: terraform_apply_result
+          delegate_to: localhost
+          become: no
+
+        - name: Display Terraform outputs
+          debug:
+            msg: "{{ terraform_apply_result.outputs }}"
+          delegate_to: localhost
+          become: no
+          when: terraform_apply_result.outputs is defined
+
+      always:
+        - name: Find PID of tunnel process
+          ansible.builtin.pids:
+            pattern: "ssh -f -N -D {{ terraform_vars.tunnel_local_port | default(5801) }} {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          register: tunnel_pid
+          delegate_to: localhost
+          become: no
+        - name: Kill tunnel process
+          ansible.builtin.command:
+            cmd: "kill -9 {{ item }}"
+          with_items: "{{ tunnel_pid.pids }}"
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+
+  post_tasks:
+    - name: Display cluster connection information
+      debug:
+        msg:
+          - "🚀 Talos cluster deployment completed!"
+          - "📊 Cluster Name: {{ cluster_name }}"
+          - "🌐 API Endpoint: {{ terraform_apply_result.outputs.cluster_endpoint.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+          - "🔧 NAT Gateway IP: {{ terraform_apply_result.outputs.nat_gateway_management_ip.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+          - "📋 Cluster Network: {{ terraform_apply_result.outputs.talos_network_cidr.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+          - "✅ Ready: {{ terraform_apply_result.outputs.cluster_ready.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+      when: terraform_apply_result.outputs is defined

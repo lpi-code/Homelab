@@ -1,0 +1,56 @@
+#cloud-config
+users:
+  - name: root
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# Basic OpenWrt configuration for NAT gateway
+write_files:
+  - path: /etc/config/network
+    content: |
+      config interface 'loopback'
+          option ifname 'lo'
+          option proto 'static'
+          option ipaddr '127.0.0.1'
+          option netmask '255.0.0.0'
+
+      config interface 'lan'
+          option ifname 'eth0'
+          option proto 'static'
+          option ipaddr '192.168.1.1'
+          option netmask '255.255.255.0'
+
+      config interface 'wan'
+          option ifname 'eth1'
+          option proto 'dhcp'
+
+  - path: /etc/config/firewall
+    content: |
+      config defaults
+          option syn_flood '1'
+          option input 'ACCEPT'
+          option output 'ACCEPT'
+          option forward 'REJECT'
+
+      config zone
+          option name 'lan'
+          list network 'lan'
+          option input 'ACCEPT'
+          option output 'ACCEPT'
+          option forward 'ACCEPT'
+
+      config zone
+          option name 'wan'
+          list network 'wan'
+          option input 'REJECT'
+          option output 'ACCEPT'
+          option forward 'REJECT'
+          option masq '1'
+
+      config forwarding
+          option src 'lan'
+          option dest 'wan'
+
+runcmd:
+  - /etc/init.d/network restart
+  - /etc/init.d/firewall restart
