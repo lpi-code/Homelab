@@ -52,7 +52,7 @@ resource "proxmox_vm_qemu" "target_vm" {
     format  = "qcow2"
   }
   
-  # Template configuration
+  # Template configuration - use Packer-created templates
   clone = local.vm_template
   
   # VM tags from Ansible

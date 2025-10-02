@@ -38,7 +38,7 @@ locals {
   vm_cores = local.terraform_vars["vm_cores"]
   vm_disk_size = local.terraform_vars["vm_disk_size"]
   vm_network = local.terraform_vars["vm_network"]
-  vm_template = local.terraform_vars["vm_template"]
+  vm_template = var.vm_template_override != null ? var.vm_template_override : local.terraform_vars["vm_template"]
   vm_tags = split(",", local.terraform_vars["vm_tags"])
   
   # Network configuration from Ansible

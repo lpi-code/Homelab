@@ -7,8 +7,9 @@ This repository contains the complete infrastructure-as-code setup for a multi-c
 - **Infrastructure**: Proxmox VE hypervisors
 - **Orchestration**: Talos Linux + Kubernetes
 - **GitOps**: Flux CD
-- **Provisioning**: Terraform
+- **Provisioning**: Terraform + Packer
 - **Configuration**: Ansible (Source of Truth)
+- **Templates**: Packer-created VM templates
 - **Environments**: Development, Staging, Production
 - **Inventory**: Dynamic inventory with environment discovery
 
@@ -53,6 +54,8 @@ Homelab/
 │   │   ├── inventory/
 │   │   │   └── dynamic_inventory.py    # Dynamic inventory merger
 │   │   ├── playbooks/                  # Shared playbooks
+│   │   │   ├── 02-create-vm-template.yml  # Packer template creation
+│   │   │   ├── 03-deploy-terraform.yml   # VM deployment
 │   │   │   ├── infrastructure/
 │   │   │   │   ├── proxmox-setup.yml
 │   │   │   │   ├── zfs-setup.yml
@@ -69,6 +72,13 @@ Homelab/
 │   │   │   ├── kubernetes/
 │   │   │   └── monitoring/
 │   │   └── requirements.yml
+│   │
+│   ├── packer/                         # VM template configurations
+│   │   ├── talos/
+│   │   │   └── talos-template.pkr.hcl
+│   │   ├── openwrt/
+│   │   │   └── openwrt-template.pkr.hcl
+│   │   └── README.md
 │   │
 │   ├── terraform/                      # Shared terraform modules
 │   │   ├── modules/
@@ -112,7 +122,8 @@ Homelab/
 
 - Python 3.8+
 - Ansible 2.9+
-- Terraform 1.0+
+- Terraform 1.0+ or OpenTofu
+- Packer 1.8+
 - Proxmox VE cluster
 - SSH access to target hosts
 
@@ -152,13 +163,14 @@ ansible all --list-hosts
 # Test connectivity
 ansible dev -m ping
 
-# Run infrastructure setup
-ansible-playbook shared/ansible/playbooks/infrastructure/proxmox-setup.yml -e target_environment=dev
+# Create VM templates with Packer
+ansible-playbook shared/ansible/playbooks/02-create-vm-template.yml -i environments/dev/ansible/inventory/hosts.toml
 
-# Deploy with Terraform
-cd environments/dev/terraform
-terraform init
-terraform plan -var="target_host=pve02-dev"
+# Deploy VMs with Terraform
+ansible-playbook shared/ansible/playbooks/03-deploy-terraform.yml -i environments/dev/ansible/inventory/hosts.toml
+
+# Deploy complete infrastructure
+ansible-playbook shared/ansible/playbooks/02-deploy-proxmox-infrastructure.yml -i environments/dev/ansible/inventory/hosts.toml
 ```
 
 ## 🔧 Key Features

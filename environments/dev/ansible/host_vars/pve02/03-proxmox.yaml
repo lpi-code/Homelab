@@ -62,3 +62,28 @@ proxmox_storage_pools:
 # proxmox_user: "{{ proxmox_user }}"
 # proxmox_password: "{{ proxmox_password }}"
 # proxmox_role_name: ""
+
+# VM Template Configuration
+vm_templates:
+  talos:
+    name: "talos-template"
+    memory: 2048
+    cores: 2
+    disk_size: "20G"
+    network_bridge: "vmbr0"
+    version: "1.8.0"
+  openwrt:
+    name: "openwrt-template"
+    memory: 512
+    cores: 1
+    disk_size: "4G"
+    network_bridge: "vmbr0"
+    version: "23.05.3"
+
+# Default VM configuration
+vm_template: "talos-template"
+vm_memory: 2048
+vm_cores: 2
+vm_disk_size: "20G"
+vm_network: "vmbr0"
+vm_tags: "kubernetes,talos"

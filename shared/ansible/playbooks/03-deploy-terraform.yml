@@ -1,0 +1,149 @@
+---
+- name: Deploy Infrastructure with Terraform (Template-aware)
+  hosts: pve
+  become: yes
+  gather_facts: no
+  collections:
+    - community.general
+  
+  vars:
+    terraform_dir: "{{ lookup('env', 'SHARED_DIR_PATH') }}/../environments/dev/terraform"
+    
+    # Template configuration
+    required_templates:
+      - name: "talos-template"
+        description: "Talos Linux template for Kubernetes clusters"
+      - name: "openwrt-template"
+        description: "OpenWrt template for network appliances"
+    
+    # VM configuration
+    vm_config:
+      talos:
+        memory: "{{ talos_vm_memory | default(2048) }}"
+        cores: "{{ talos_vm_cores | default(2) }}"
+        disk_size: "{{ talos_vm_disk_size | default('20G') }}"
+        template: "talos-template"
+      openwrt:
+        memory: "{{ openwrt_vm_memory | default(512) }}"
+        cores: "{{ openwrt_vm_cores | default(1) }}"
+        disk_size: "{{ openwrt_vm_disk_size | default('4G') }}"
+        template: "openwrt-template"
+
+  pre_tasks:
+    - name: Check if required templates exist
+      command: qm list --full
+      register: available_templates
+      changed_when: false
+      
+    - name: Extract template names
+      set_fact:
+        available_template_names: "{{ available_templates.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Check template availability
+      set_fact:
+        missing_templates: "{{ required_templates | selectattr('name', 'not in', available_template_names) | map(attribute='name') | list }}"
+
+    - name: Fail if required templates are missing
+      fail:
+        msg: "Required templates are missing: {{ missing_templates }}. Please run the 02-create-vm-template playbook first."
+      when: missing_templates | length > 0
+
+    - name: Display available templates
+      debug:
+        msg: "Available templates: {{ available_template_names }}"
+
+    - name: Check if terraform directory exists
+      stat:
+        path: "{{ terraform_dir }}"
+      register: terraform_dir_stat
+      changed_when: false
+      delegate_to: localhost
+      become: no
+    
+    - name: Fail if terraform directory does not exist
+      fail:
+        msg: "Terraform directory does not exist: {{ terraform_dir }}"
+      when: not terraform_dir_stat.stat.exists
+      delegate_to: localhost
+      become: no
+
+    - name: Check if storage pool exists
+      command: pvesm status
+      register: storage_status
+      changed_when: false
+      
+    - name: Extract available storage pool names
+      set_fact:
+        available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify storage pool is available
+      fail:
+        msg: "Storage pool '{{ proxmox_default_storage_pool }}' not found. Available pools: {{ available_storage_pools }}"
+      when: proxmox_default_storage_pool is not defined or proxmox_default_storage_pool not in available_storage_pools
+
+  tasks:
+    - name: Deploy VMs with Terraform
+      block:
+        - name: Initialize Terraform
+          community.general.terraform:
+            project_path: "{{ terraform_dir }}"
+            force_init: true
+            workspace: "default"
+            backend_config: {}
+          delegate_to: localhost
+          become: no
+          
+        - name: Plan Terraform deployment
+          community.general.terraform:
+            project_path: "{{ terraform_dir }}"
+            state: "present"
+            variables: "{{ terraform_variables | default({}) }}"
+            plan_file: "{{ terraform_dir }}/terraform.tfplan"
+          register: terraform_plan
+          delegate_to: localhost
+          become: no
+          
+        - name: Display Terraform plan
+          debug:
+            msg: "{{ terraform_plan.stdout_lines }}"
+          when: terraform_plan.stdout_lines is defined
+          
+        - name: Apply Terraform configuration
+          community.general.terraform:
+            project_path: "{{ terraform_dir }}"
+            state: "present"
+            variables: "{{ terraform_variables | default({}) }}"
+          register: terraform_apply
+          delegate_to: localhost
+          become: no
+          
+        - name: Display Terraform apply result
+          debug:
+            msg: "{{ terraform_apply.stdout_lines }}"
+          when: terraform_apply.stdout_lines is defined
+          
+        - name: Fail if Terraform apply failed
+          fail:
+            msg: "Terraform apply failed: {{ terraform_apply.stderr }}"
+          when: terraform_apply.rc != 0
+
+  post_tasks:
+    - name: Verify VM deployment
+      command: qm list --full
+      register: deployed_vms
+      changed_when: false
+      
+    - name: Display deployed VMs
+      debug:
+        msg: "Deployed VMs: {{ deployed_vms.stdout_lines }}"
+        
+    - name: Set deployment status
+      set_fact:
+        deployment_successful: "{{ terraform_apply.rc == 0 }}"
+        
+    - name: Display deployment status
+      debug:
+        msg:
+          - "Deployment successful: {{ deployment_successful }}"
+          - "Templates used: {{ available_template_names }}"
+          - "VMs deployed: {{ deployed_vms.stdout_lines | length }}"

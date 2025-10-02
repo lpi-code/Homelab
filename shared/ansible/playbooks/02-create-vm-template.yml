@@ -1,0 +1,263 @@
+---
+- name: Create VM Templates with Packer
+  hosts: pve
+  become: yes
+  gather_facts: no
+  collections:
+    - community.general
+  
+  vars:
+    packer_dir: "{{ lookup('env', 'SHARED_DIR_PATH') }}/packer"
+    talos_packer_config: "{{ packer_dir }}/talos/talos-template.pkr.hcl"
+    openwrt_packer_config: "{{ packer_dir }}/openwrt/openwrt-template.pkr.hcl"
+    
+    # Template configuration
+    talos_template_name: "talos-template"
+    openwrt_template_name: "openwrt-template"
+    
+    # VM resource configuration
+    talos_vm_memory: "{{ talos_vm_memory | default(2048) }}"
+    talos_vm_cores: "{{ talos_vm_cores | default(2) }}"
+    talos_vm_disk_size: "{{ talos_vm_disk_size | default('20G') }}"
+    
+    openwrt_vm_memory: "{{ openwrt_vm_memory | default(512) }}"
+    openwrt_vm_cores: "{{ openwrt_vm_cores | default(1) }}"
+    openwrt_vm_disk_size: "{{ openwrt_vm_disk_size | default('4G') }}"
+    
+    # Network configuration
+    vm_network_bridge: "{{ vm_network_bridge | default('vmbr0') }}"
+    
+    # Version configuration
+    talos_version: "{{ talos_version | default('1.8.0') }}"
+    openwrt_version: "{{ openwrt_version | default('23.05.3') }}"
+
+  pre_tasks:
+    - name: Check if Packer is installed
+      command: packer version
+      register: packer_check
+      changed_when: false
+      ignore_errors: true
+      
+    - name: Fail if Packer is not installed
+      fail:
+        msg: "Packer is not installed. Please install Packer first."
+      when: packer_check.failed
+      
+    - name: Display Packer version
+      debug:
+        msg: "Packer version: {{ packer_check.stdout }}"
+        
+    - name: Check if packer directory exists
+      stat:
+        path: "{{ packer_dir }}"
+      register: packer_dir_stat
+      changed_when: false
+      delegate_to: localhost
+      become: no
+    
+    - name: Fail if packer directory does not exist
+      fail:
+        msg: "Packer directory does not exist: {{ packer_dir }}"
+      when: not packer_dir_stat.stat.exists
+      delegate_to: localhost
+      become: no
+
+    - name: Check if Proxmox storage pools exist
+      command: pvesm status
+      register: storage_status
+      changed_when: false
+      
+    - name: Extract available storage pool names
+      set_fact:
+        available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify storage pool is available
+      fail:
+        msg: "Storage pool '{{ proxmox_default_storage_pool }}' not found. Available pools: {{ available_storage_pools }}"
+      when: proxmox_default_storage_pool is not defined or proxmox_default_storage_pool not in available_storage_pools
+
+    - name: Check if ISO storage pool exists
+      fail:
+        msg: "ISO storage pool 'storage-isos' not found. Available pools: {{ available_storage_pools }}"
+      when: 'storage-isos' not in available_storage_pools
+
+  tasks:
+    - name: Download Talos ISO if not exists
+      block:
+        - name: Check if Talos ISO exists
+          stat:
+            path: "/var/lib/vz/template/iso/talos-amd64.iso"
+          register: talos_iso_stat
+          
+        - name: Download Talos ISO
+          get_url:
+            url: "https://github.com/siderolabs/talos/releases/download/v{{ talos_version }}/talos-amd64.iso"
+            dest: "/var/lib/vz/template/iso/talos-amd64.iso"
+            mode: '0644'
+            timeout: 300
+          when: not talos_iso_stat.stat.exists
+          
+        - name: Verify Talos ISO download
+          stat:
+            path: "/var/lib/vz/template/iso/talos-amd64.iso"
+          register: talos_iso_verify
+          
+        - name: Fail if Talos ISO download failed
+          fail:
+            msg: "Failed to download Talos ISO"
+          when: not talos_iso_verify.stat.exists
+
+    - name: Download OpenWrt ISO if not exists
+      block:
+        - name: Check if OpenWrt ISO exists
+          stat:
+            path: "/var/lib/vz/template/iso/openwrt-{{ openwrt_version }}-x86-64-generic-ext4-combined.img.gz"
+          register: openwrt_iso_stat
+          
+        - name: Download OpenWrt ISO
+          get_url:
+            url: "https://downloads.openwrt.org/releases/{{ openwrt_version }}/targets/x86/64/openwrt-{{ openwrt_version }}-x86-64-generic-ext4-combined.img.gz"
+            dest: "/var/lib/vz/template/iso/openwrt-{{ openwrt_version }}-x86-64-generic-ext4-combined.img.gz"
+            mode: '0644'
+            timeout: 300
+          when: not openwrt_iso_stat.stat.exists
+          
+        - name: Verify OpenWrt ISO download
+          stat:
+            path: "/var/lib/vz/template/iso/openwrt-{{ openwrt_version }}-x86-64-generic-ext4-combined.img.gz"
+          register: openwrt_iso_verify
+          
+        - name: Fail if OpenWrt ISO download failed
+          fail:
+            msg: "Failed to download OpenWrt ISO"
+          when: not openwrt_iso_verify.stat.exists
+
+    - name: Check if Talos template already exists
+      command: qm list --full
+      register: existing_templates
+      changed_when: false
+      
+    - name: Set fact for Talos template existence
+      set_fact:
+        talos_template_exists: "{{ talos_template_name in existing_templates.stdout }}"
+
+    - name: Check if OpenWrt template already exists
+      set_fact:
+        openwrt_template_exists: "{{ openwrt_template_name in existing_templates.stdout }}"
+
+    - name: Build Talos template with Packer
+      block:
+        - name: Initialize Packer for Talos template
+          community.general.terraform:
+            project_path: "{{ packer_dir }}/talos"
+            force_init: true
+            binary_path: "/usr/bin/packer"
+            workspace: "default"
+            backend_config: {}
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+          
+        - name: Build Talos template
+          shell: |
+            cd {{ packer_dir }}/talos
+            packer build \
+              -var "proxmox_api_url={{ proxmox_api_url }}" \
+              -var "proxmox_user={{ proxmox_user }}" \
+              -var "proxmox_password={{ proxmox_password }}" \
+              -var "proxmox_node={{ hostname }}" \
+              -var "proxmox_storage_pool={{ proxmox_default_storage_pool }}" \
+              -var "vm_memory={{ talos_vm_memory }}" \
+              -var "vm_cores={{ talos_vm_cores }}" \
+              -var "vm_disk_size={{ talos_vm_disk_size }}" \
+              -var "vm_network_bridge={{ vm_network_bridge }}" \
+              -var "talos_version={{ talos_version }}" \
+              talos-template.pkr.hcl
+          register: talos_build_result
+          delegate_to: localhost
+          become: no
+          when: not talos_template_exists
+          
+        - name: Display Talos build result
+          debug:
+            msg: "{{ talos_build_result.stdout_lines }}"
+          when: not talos_template_exists and talos_build_result.stdout_lines is defined
+          
+        - name: Fail if Talos build failed
+          fail:
+            msg: "Talos template build failed: {{ talos_build_result.stderr }}"
+          when: not talos_template_exists and talos_build_result.rc != 0
+          
+        - name: Skip Talos template build
+          debug:
+            msg: "Talos template already exists, skipping build"
+          when: talos_template_exists
+
+    - name: Build OpenWrt template with Packer
+      block:
+        - name: Initialize Packer for OpenWrt template
+          community.general.terraform:
+            project_path: "{{ packer_dir }}/openwrt"
+            force_init: true
+            binary_path: "/usr/bin/packer"
+            workspace: "default"
+            backend_config: {}
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+          
+        - name: Build OpenWrt template
+          shell: |
+            cd {{ packer_dir }}/openwrt
+            packer build \
+              -var "proxmox_api_url={{ proxmox_api_url }}" \
+              -var "proxmox_user={{ proxmox_user }}" \
+              -var "proxmox_password={{ proxmox_password }}" \
+              -var "proxmox_node={{ hostname }}" \
+              -var "proxmox_storage_pool={{ proxmox_default_storage_pool }}" \
+              -var "vm_memory={{ openwrt_vm_memory }}" \
+              -var "vm_cores={{ openwrt_vm_cores }}" \
+              -var "vm_disk_size={{ openwrt_vm_disk_size }}" \
+              -var "vm_network_bridge={{ vm_network_bridge }}" \
+              -var "openwrt_version={{ openwrt_version }}" \
+              openwrt-template.pkr.hcl
+          register: openwrt_build_result
+          delegate_to: localhost
+          become: no
+          when: not openwrt_template_exists
+          
+        - name: Display OpenWrt build result
+          debug:
+            msg: "{{ openwrt_build_result.stdout_lines }}"
+          when: not openwrt_template_exists and openwrt_build_result.stdout_lines is defined
+          
+        - name: Fail if OpenWrt build failed
+          fail:
+            msg: "OpenWrt template build failed: {{ openwrt_build_result.stderr }}"
+          when: not openwrt_template_exists and openwrt_build_result.rc != 0
+          
+        - name: Skip OpenWrt template build
+          debug:
+            msg: "OpenWrt template already exists, skipping build"
+          when: openwrt_template_exists
+
+  post_tasks:
+    - name: Verify templates were created
+      command: qm list --full
+      register: final_templates
+      changed_when: false
+      
+    - name: Display created templates
+      debug:
+        msg: "Available templates: {{ final_templates.stdout_lines }}"
+        
+    - name: Set template facts for other playbooks
+      set_fact:
+        talos_template_available: "{{ talos_template_name in final_templates.stdout }}"
+        openwrt_template_available: "{{ openwrt_template_name in final_templates.stdout }}"
+        
+    - name: Display template availability status
+      debug:
+        msg:
+          - "Talos template available: {{ talos_template_available }}"
+          - "OpenWrt template available: {{ openwrt_template_available }}"
