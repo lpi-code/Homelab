@@ -3,6 +3,10 @@ domain: "homelab.local"
 fqdn: "pve02.homelab.local"
 mailto: "admin@homelab.local"
 
+
+proxmox_qcow2_image_path: "/var/lib/vz"
+proxmox_import_image_path: "/var/lib/vz/template/import"
+proxmox_iso_path: "/var/lib/vz/template/iso"
 proxmox_validate_certs: false
 proxmox:
   # Repository Configuration
@@ -35,6 +39,7 @@ proxmox:
 
 # Proxmox Storage Pools Configuration
 proxmox_default_storage_pool: "storage-vms"
+proxmox_default_iso_pool: "storage-isos"
 proxmox_storage_pools:
   storage-vms:
     type: "zfs"
@@ -52,7 +57,7 @@ proxmox_storage_pools:
     pool: "storage/backups"
   storage-isos:
     type: "dir"
-    content: "iso"
+    content: "iso,import"
     nodes: "{{ hostname }}"
     disable: false
     shared: false
@@ -62,3 +67,30 @@ proxmox_storage_pools:
 # proxmox_user: "{{ proxmox_user }}"
 # proxmox_password: "{{ proxmox_password }}"
 # proxmox_role_name: ""
+
+proxmox_api_url: "https://{{ ansible_host }}:8006/api2/json"
+# VM Template Configuration
+vm_templates:
+  talos:
+    name: "talos-template"
+    memory: 2048
+    cores: 2
+    disk_size: "20G"
+    network_bridge: "vmbr0"
+    version: "1.8.0"
+  openwrt:
+    name: "openwrt-template"
+    memory: 512
+    cores: 1
+    disk_size: "4G"
+    network_bridge: "vmbr0"
+    version: "23.05.3"
+
+# Default VM configuration
+vm_template: "talos-template"
+vm_memory: 2048
+vm_cores: 2
+vm_disk_size: "20G"
+vm_network: "vmbr0"
+vm_tags: "kubernetes,talos"
+

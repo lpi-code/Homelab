@@ -1,0 +1,16 @@
+# 🚀 Talos Cluster Configuration for pve02
+# Host-specific variables for Talos cluster deployment
+
+
+# Template Configuration
+template_vm_id: 100
+
+# Terraform Tunnel Configuration
+terraform_vars:
+  token_name: "terraform-talos-token"
+  tunnel_local_port: 5801
+  tunnel_remote_port: 8006
+
+# Additional Proxmox Configuration
+
+
