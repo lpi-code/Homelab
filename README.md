@@ -1,18 +1,18 @@
 # Homelab Infrastructure
 
-This repository contains the complete infrastructure-as-code setup for a multi-cluster Kubernetes homelab running on Proxmox with Talos Linux and Flux GitOps, now reorganized with an environment-first structure and Ansible as the source of truth.
+This repository contains the complete infrastructure-as-code setup for a Talos Kubernetes homelab running on Proxmox with an environment-first structure and Ansible as the source of truth.
 
 ## 🏗️ Architecture Overview
 
 - **Infrastructure**: Proxmox VE hypervisors
 - **Orchestration**: Talos Linux + Kubernetes
-- **GitOps**: Flux CD
-- **Provisioning**: Terraform
+- **Provisioning**: Terraform + OpenTofu
 - **Configuration**: Ansible (Source of Truth)
+- **Networking**: OpenWrt NAT gateway for cluster internet access
 - **Environments**: Development, Staging, Production
-- **Inventory**: Dynamic inventory with environment discovery
+- **Inventory**: TOML-based inventory with environment separation
 
-## 📁 New Structure
+## 📁 Project Structure
 
 ```
 Homelab/
@@ -20,27 +20,24 @@ Homelab/
 │   ├── dev/                              # Development environment
 │   │   ├── ansible/                      # Dev-specific ansible configs
 │   │   │   ├── inventory/
-│   │   │   │   └── hosts.yaml           # Dev hosts with terraform_vars
+│   │   │   │   └── hosts.toml           # Dev hosts inventory
 │   │   │   ├── group_vars/
-│   │   │   │   ├── dev/
-│   │   │   │   │   ├── main.yaml        # Common dev variables
-│   │   │   │   │   └── terraform.yaml   # Terraform-specific variables
-│   │   │   │   └── all/                 # Shared variables
-│   │   │   ├── host_vars/
-│   │   │   │   └── dev-hosts/           # Dev-specific host vars
+│   │   │   │   ├── all/                 # Global variables
+│   │   │   │   ├── dev/                 # Dev environment variables
+│   │   │   │   ├── dev_pve/             # Proxmox VE group variables
+│   │   │   │   └── dev_talos/           # Talos cluster variables
+│   │   │   └── host_vars/
+│   │   │       └── pve02/               # Host-specific variables
 │   │   ├── terraform/                   # Dev-specific terraform
-│   │   │   ├── main.tf
-│   │   │   ├── variables.tf
-│   │   │   ├── outputs.tf
+│   │   │   ├── main.tf                  # Main cluster configuration
+│   │   │   ├── variables.tf             # Variable definitions
+│   │   │   ├── outputs.tf               # Output definitions
 │   │   │   ├── data-sources.tf          # Ansible data integration
-│   │   │   └── terraform.tfvars
+│   │   │   └── terraform.tfvars.example # Example variables
 │   │   ├── kubernetes/                  # Dev-specific k8s configs
 │   │   │   ├── clusters/
 │   │   │   └── apps/
-│   │   └── configs/                     # Dev-specific configs
-│   │       ├── flux/
-│   │       ├── talos/
-│   │       └── proxmox/
+│   │   └── README.md                    # Environment documentation
 │   │
 │   ├── staging/                         # Staging environment
 │   │   └── [same structure as dev]
@@ -53,32 +50,19 @@ Homelab/
 │   │   ├── inventory/
 │   │   │   └── dynamic_inventory.py    # Dynamic inventory merger
 │   │   ├── playbooks/                  # Shared playbooks
-│   │   │   ├── infrastructure/
-│   │   │   │   ├── proxmox-setup.yml
-│   │   │   │   ├── zfs-setup.yml
-│   │   │   │   ├── network-setup.yml
-│   │   │   │   └── deploy-cluster.yml
-│   │   │   ├── kubernetes/
-│   │   │   │   ├── talos-bootstrap.yml
-│   │   │   │   └── cluster-setup.yml
-│   │   │   └── maintenance/
-│   │   │       ├── backup.yml
-│   │   │       └── updates.yml
-│   │   ├── roles/                      # Shared roles
-│   │   │   ├── proxmox/
-│   │   │   ├── kubernetes/
-│   │   │   └── monitoring/
-│   │   └── requirements.yml
+│   │   │   ├── 00-post-install-pve.yml # Proxmox post-install
+│   │   │   ├── 01-zfs-setup.yml        # ZFS storage setup
+│   │   │   ├── 02-create-vm-template.yml # VM template creation
+│   │   │   └── 03-deploy-talos-cluster.yml # Cluster deployment
+│   │   └── requirements.yaml           # Ansible requirements
 │   │
 │   ├── terraform/                      # Shared terraform modules
 │   │   ├── modules/
-│   │   │   ├── network/
-│   │   │   ├── proxmox-vm/
-│   │   │   ├── talos-cluster/
-│   │   │   └── monitoring/
+│   │   │   ├── talos-network/          # Network infrastructure
+│   │   │   ├── talos-vm/               # Individual VM module
+│   │   │   ├── talos-cluster/          # Complete cluster module
+│   │   │   └── openwrt-router/         # OpenWrt router module
 │   │   └── global/                     # Global resources
-│   │       ├── providers.tf
-│   │       └── backend.tf
 │   │
 │   ├── kubernetes/                     # Shared k8s components
 │   │   ├── base/                       # Base manifests
@@ -86,24 +70,23 @@ Homelab/
 │   │   └── templates/                  # Kustomize templates
 │   │
 │   ├── configs/                        # Shared configuration templates
-│   │   ├── flux/
-│   │   ├── talos/
-│   │   └── proxmox/
+│   │   ├── ansible.cfg                 # Ansible configuration
+│   │   └── sops.yaml                   # SOPS configuration
 │   │
-│   └── scripts/                        # Shared scripts
-│       ├── ansible/
-│       ├── terraform/
-│       ├── kubernetes/
-│       └── utils/
+│   ├── scripts/                        # Shared scripts
+│   │   └── setup-unatend-proxmox.sh    # Proxmox setup script
+│   │
+│   └── requirements/                   # Python requirements
+│       ├── requirements.txt            # Python dependencies
+│       └── requirements.yaml           # Ansible collections
 │
 ├── docs/                               # Documentation
-│   ├── MIGRATION_GUIDE.md             # Migration instructions
-│   ├── USAGE_GUIDE.md                 # Usage documentation
-│   └── ARCHITECTURE.md                # Architecture details
-├── secrets/                            # Encrypted secrets
-├── ansible.cfg                         # Updated to use dynamic inventory
-├── requirements.yaml                   # Global requirements
-└── README.md
+│   ├── deployment/
+│   │   └── README-setup-unatend-proxmox.md
+│   └── gitops/
+│       └── SOPS_SETUP.md
+├── LICENSE                             # Project license
+└── README.md                           # This file
 ```
 
 ## 🚀 Quick Start
@@ -112,7 +95,7 @@ Homelab/
 
 - Python 3.8+
 - Ansible 2.9+
-- Terraform 1.0+
+- OpenTofu 1.6+ (or Terraform 1.0+)
 - Proxmox VE cluster
 - SSH access to target hosts
 
@@ -121,119 +104,114 @@ Homelab/
 1. **Clone repository**
    ```bash
    git clone <repository-url>
-   cd homelab
+   cd Homelab
    ```
 
 2. **Install dependencies**
    ```bash
-   pip install -r requirements.txt
+   pip install -r shared/requirements/requirements.txt
+   ansible-galaxy install -r shared/requirements/requirements.yaml
    ```
 
 3. **Configure SSH access**
    ```bash
-   ssh-copy-id root@192.168.1.102
-   # ... for all hosts
+   ssh-copy-id root@192.168.0.149  # Replace with your Proxmox IP
    ```
 
-4. **Test dynamic inventory**
+4. **Configure environment variables**
    ```bash
-   ./shared/ansible/inventory/dynamic_inventory.py --list-environments
+   export ANSIBLE_ENVIRONMENT=dev
+   export SHARED_DIR_PATH=/path/to/Homelab/shared
    ```
 
 ### Basic Usage
 
 ```bash
-# List all environments
-./shared/ansible/inventory/dynamic_inventory.py --list-environments
+# Test connectivity to Proxmox
+ansible dev -m ping -i environments/dev/ansible/inventory/hosts.toml
 
-# List all hosts
-ansible all --list-hosts
-
-# Test connectivity
-ansible dev -m ping
-
-# Run infrastructure setup
-ansible-playbook shared/ansible/playbooks/infrastructure/proxmox-setup.yml -e target_environment=dev
-
-# Deploy with Terraform
+# Deploy Talos cluster
 cd environments/dev/terraform
-terraform init
-terraform plan -var="target_host=pve02-dev"
+tofu init
+tofu plan
+tofu apply
+
+# Access the cluster
+export KUBECONFIG=./kubeconfig.yaml
+kubectl get nodes
 ```
 
 ## 🔧 Key Features
 
-### Dynamic Inventory System
+### Environment-First Architecture
 
-- **Automatic Discovery**: Discovers hosts from all environments
-- **Environment Isolation**: Clear separation between dev/staging/prod
-- **Single Source of Truth**: Ansible inventory drives all configuration
-- **Validation**: Built-in inventory validation and error checking
-
-### Terraform Integration
-
-- **Bidirectional Data Flow**: Terraform queries Ansible for host information
-- **No Duplication**: Host variables defined once in Ansible inventory
-- **Environment Consistency**: Same variables used across tools
-- **State Independence**: Terraform state separate from Ansible data
-
-### Environment Management
-
-- **Environment-First**: Clear separation by environment
-- **Shared Components**: Common playbooks, roles, and modules
+- **Clear Separation**: Each environment (dev/staging/prod) has its own configuration
+- **Shared Components**: Common Terraform modules and Ansible playbooks
 - **Consistent Structure**: Same layout across all environments
 - **Scalable**: Easy to add new environments
 
+### Talos Kubernetes Cluster
+
+- **Immutable OS**: Talos Linux for security and reliability
+- **Automated Deployment**: Complete cluster setup with OpenTofu
+- **OpenWrt NAT Gateway**: Automated internet access for cluster nodes
+- **High Availability**: Multiple control plane nodes with load balancing
+
+### Infrastructure as Code
+
+- **OpenTofu/Terraform**: Infrastructure provisioning and management
+- **Ansible**: Configuration management and orchestration
+- **SOPS**: Encrypted secrets management
+- **Version Control**: All configurations tracked in Git
+
 ## 📋 Usage Examples
-
-### Dynamic Inventory
-
-```bash
-# List environments
-./shared/ansible/inventory/dynamic_inventory.py --list-environments
-
-# List all hosts
-./shared/ansible/inventory/dynamic_inventory.py --list
-
-# List dev environment hosts
-./shared/ansible/inventory/dynamic_inventory.py --list --env dev
-
-# Get host variables
-./shared/ansible/inventory/dynamic_inventory.py --host pve02-dev
-
-# Validate inventory
-./shared/ansible/inventory/dynamic_inventory.py --validate
-```
 
 ### Ansible Operations
 
 ```bash
-# Environment targeting
-ansible dev -m ping
-ansible staging -m ping
-ansible prod -m ping
+# Test connectivity to Proxmox nodes
+ansible dev -m ping -i environments/dev/ansible/inventory/hosts.toml
 
-# Group targeting
-ansible dev_pve -m ping
-ansible dev_k8s_control -m ping
+# Run Proxmox post-install setup
+ansible-playbook shared/ansible/playbooks/00-post-install-pve.yml -i environments/dev/ansible/inventory/hosts.toml
 
-# Playbook execution
-ansible-playbook shared/ansible/playbooks/infrastructure/proxmox-setup.yml -e target_environment=dev
-ansible-playbook shared/ansible/playbooks/kubernetes/talos-bootstrap.yml -e target_environment=dev
+# Setup ZFS storage
+ansible-playbook shared/ansible/playbooks/01-zfs-setup.yml -i environments/dev/ansible/inventory/hosts.toml
+
+# Deploy Talos cluster
+ansible-playbook shared/ansible/playbooks/03-deploy-talos-cluster.yml -i environments/dev/ansible/inventory/hosts.toml
 ```
 
-### Terraform Operations
+### OpenTofu Operations
 
 ```bash
 # Navigate to environment
 cd environments/dev/terraform
 
 # Initialize and plan
-terraform init
-terraform plan -var="target_host=pve02-dev"
+tofu init
+tofu plan
 
 # Apply infrastructure
-terraform apply -var="target_host=pve02-dev"
+tofu apply
+
+# View outputs
+tofu output
+```
+
+### Cluster Management
+
+```bash
+# Get cluster information
+tofu output cluster_info
+
+# Access cluster with kubectl
+export KUBECONFIG=./kubeconfig.yaml
+kubectl get nodes
+
+# Access cluster with talosctl
+export TALOSCONFIG=./talos_client_configuration.yaml
+talosctl get nodes
 ```
 
 ## 🔐 Security
@@ -245,45 +223,43 @@ terraform apply -var="target_host=pve02-dev"
 
 ## 📚 Documentation
 
-- **[Migration Guide](docs/MIGRATION_GUIDE.md)**: Step-by-step migration instructions
-- **[Usage Guide](docs/USAGE_GUIDE.md)**: Comprehensive usage documentation
-- **[Architecture Guide](docs/ARCHITECTURE.md)**: Detailed architecture overview
+- **[Development Environment](environments/dev/README.md)**: Dev environment setup and usage
+- **[Terraform Modules](shared/terraform/modules/README.md)**: Module documentation
+- **[Proxmox Setup](docs/deployment/README-setup-unatend-proxmox.md)**: Proxmox installation guide
+- **[SOPS Setup](docs/gitops/SOPS_SETUP.md)**: Secrets management guide
 
 ## 🧪 Testing
 
 ```bash
-# Validate inventory
-./shared/ansible/inventory/dynamic_inventory.py --validate
+# Test connectivity to Proxmox
+ansible dev -m ping -i environments/dev/ansible/inventory/hosts.toml
 
-# Test connectivity
-ansible all -m ping
+# Validate Terraform configuration
+cd environments/dev/terraform
+tofu validate
 
-# Test Terraform integration
-./shared/scripts/terraform/ansible_data_source.py --hostname pve02-dev --environment dev
+# Plan infrastructure changes
+tofu plan
 
-# Run playbook tests
-ansible-playbook shared/ansible/playbooks/infrastructure/proxmox-setup.yml -e target_environment=dev --check
+# Test Ansible playbooks in check mode
+ansible-playbook shared/ansible/playbooks/00-post-install-pve.yml -i environments/dev/ansible/inventory/hosts.toml --check
 ```
 
 ## 🤝 Contributing
 
 1. Follow the environment-first structure
 2. Update inventory files for new hosts
-3. Use shared playbooks and roles
+3. Use shared Terraform modules and Ansible playbooks
 4. Maintain environment isolation
 5. Update documentation
 
 ## 📄 License
 
-<<<<<<< Current (Your changes)
-[Add your license here]
-=======
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🆘 Support
 
-- Check [Migration Guide](docs/MIGRATION_GUIDE.md) for setup issues
-- Review [Usage Guide](docs/USAGE_GUIDE.md) for operational questions
+- Check environment-specific README files for setup issues
+- Review module documentation for configuration questions
 - Create issues for bugs or feature requests
 - Check troubleshooting sections in documentation
->>>>>>> Incoming (Background Agent changes)

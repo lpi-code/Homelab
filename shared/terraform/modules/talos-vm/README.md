@@ -1,17 +1,16 @@
 # 🚀 Talos VM Module
 
-This Terraform module creates a single Talos VM using the `talos-vm-template` module for custom image creation. It can either create a new template with custom system extensions or use an existing template.
+This Terraform module creates a single Talos VM from an existing template. It provides automatic Talos configuration generation and application for both control plane and worker nodes.
 
 ## ✨ Features
 
-- 🏭 **Template Integration**: Uses `talos-vm-template` module for custom Talos images
-- 🎨 **Custom System Extensions**: Pre-installed drivers and tools via Image Factory
-- 🖥️ **Flexible Template Management**: Create new templates or use existing ones
+- 🖥️ **VM Creation**: Creates Talos VMs from existing templates
 - 🎯 **Node Type Support**: Both control plane and worker nodes
-- 🌐 **Network Configuration**: Static IP or DHCP networking
+- 🌐 **Network Configuration**: Static IP networking
 - ⚙️ **Automatic Configuration**: Talos configuration generation and application
 - 📝 **Beautiful Descriptions**: Emoji-enhanced VM descriptions
 - 🔧 **Hardware Flexibility**: Configurable VM sizing and settings
+- 🔐 **Security**: Automatic Talos machine configuration application
 
 ## 🏗️ Architecture
 
@@ -20,10 +19,10 @@ This Terraform module creates a single Talos VM using the `talos-vm-template` mo
 │                Talos VM Module                             │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │ Template Module  │  │ VM Creation      │                  │
-│  │ • Custom Image   │  │ • Clone Template │                  │
-│  │ • System Exts    │  │ • Configure VM   │                  │
-│  │ • Image Factory  │  │ • Apply Talos    │                  │
+│  │ Template VM      │  │ VM Creation      │                  │
+│  │ • Existing       │  │ • Clone Template │                  │
+│  │ • Talos Image    │  │ • Configure VM   │                  │
+│  │ • Ready to Use   │  │ • Apply Talos    │                  │
 │  └─────────────────┘  └─────────────────┘                  │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐  ┌─────────────────┐                  │
@@ -45,70 +44,12 @@ module "talos_control_plane" {
 
   # VM Configuration
   vm_name        = "talos-cp-1"
-  vm_id          = 100
-  template_vm_id = 9999  # ID of existing template
+  vm_id          = 101
+  template_vm_id = 100  # ID of existing template
 
   # Proxmox Configuration
   proxmox_node = "pve02"
   storage_pool = "local-zfs"
-
-  # Network Configuration
-  network_bridge      = "vmbr1"
-  use_static_ip       = true
-  static_ip          = "10.10.0.10"
-  network_gateway    = "10.10.0.1"
-  network_cidr_suffix = 24
-
-  # Talos Configuration
-  cluster_name     = "dev-cluster"
-  cluster_endpoint = "https://10.10.0.10:6443"
-  node_type        = "controlplane"
-  node_index       = 0
-
-  # Machine secrets and client configuration
-  machine_secrets      = talos_machine_secrets.cluster.machine_secrets
-  client_configuration = talos_machine_secrets.cluster.client_configuration
-
-  # VM Resources
-  vm_cores  = 2
-  vm_memory = 4096
-  vm_disk_size = "50G"
-}
-```
-
-### Advanced Example (Creating New Template)
-
-```hcl
-module "talos_control_plane" {
-  source = "./modules/talos-vm"
-
-  # Template Creation
-  create_template = true
-  talos_version   = "1.9.5"
-  template_name   = "talos-template-v1.9.5"
-  template_vm_id  = 9999
-
-  # Custom System Extensions
-  system_extensions = [
-    "siderolabs/intel-ucode",
-    "siderolabs/qemu-guest-agent",
-    "siderolabs/util-linux-tools",
-    "siderolabs/amd-ucode"
-  ]
-
-  # Template Configuration
-  template_vm_cores    = 2
-  template_vm_memory   = 2048
-  template_vm_disk_size = "20G"
-
-  # VM Configuration
-  vm_name        = "talos-cp-1"
-  vm_id          = 100
-
-  # Proxmox Configuration
-  proxmox_node = "pve02"
-  storage_pool = "local-zfs"
-  iso_pool     = "storage-isos"
 
   # Network Configuration
   network_bridge      = "vmbr1"
@@ -142,8 +83,8 @@ module "talos_worker" {
 
   # VM Configuration
   vm_name        = "talos-worker-1"
-  vm_id          = 120
-  template_vm_id = 9999
+  vm_id          = 201
+  template_vm_id = 100  # ID of existing template
 
   # Proxmox Configuration
   proxmox_node = "pve02"
@@ -173,20 +114,21 @@ module "talos_worker" {
 }
 ```
 
+
 ## Requirements
 
 | Name | Version |
 |------|---------|
 | terraform | >= 1.0 |
 | proxmox | >= 2.9.0 |
-| talos | >= 0.3.0 |
+| talos | >= 1.9.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | proxmox | >= 2.9.0 |
-| talos | >= 0.3.0 |
+| talos | >= 1.9.0 |
 
 ## Inputs
 
@@ -236,7 +178,7 @@ module "talos_worker" {
 
 ## Prerequisites
 
-1. **Packer-built Talos template** - Use the Packer configuration in the `packer/` directory
+1. **Talos template VM** - Pre-created Talos template VM (ID 100)
 2. **Proxmox API access** - Configured with appropriate permissions
 3. **Talos machine secrets** - Generated using `talos_machine_secrets` resource
 4. **Network configuration** - Bridge and IP ranges properly configured
@@ -246,7 +188,7 @@ module "talos_worker" {
 This module is designed to work with:
 - **talos-cluster module** - For complete cluster deployment
 - **network module** - For network infrastructure
-- **loadbalancer module** - For cluster endpoint load balancing
+- **openwrt-router module** - For NAT gateway functionality
 
 ## Notes
 

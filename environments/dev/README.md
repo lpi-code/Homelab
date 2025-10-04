@@ -132,8 +132,8 @@ Key variables in `terraform/terraform.tfvars`:
 │                    10.10.0.0/24                            │
 │                                                             │
 │  ┌─────────────┐    ┌─────────────────────────────────────┐ │
-│  │ NAT Gateway │    │        Talos Cluster                │ │
-│  │             │    │                                     │ │
+│  │ OpenWrt NAT │    │        Talos Cluster                │ │
+│  │   Gateway   │    │                                     │ │
 │  │ 10.10.0.200 │    │  Control Planes: .10, .11, .12     │ │
 │  │             │    │  Workers: .20, .21, .22            │ │
 │  │ 192.168.0.200│   │                                     │ │
@@ -141,87 +141,115 @@ Key variables in `terraform/terraform.tfvars`:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Network Components
+
+- **Management Network (192.168.0.0/24)**: Proxmox management and OpenWrt WAN interface
+- **Cluster Network (10.10.0.0/24)**: Talos cluster internal communication
+- **OpenWrt NAT Gateway**: Provides internet access for cluster nodes
+- **Bridge vmbr1**: Dedicated bridge for cluster network isolation
+
 ## 📊 Cluster Information
 
 After deployment, you can access:
 
 - **Kubernetes API**: `https://10.10.0.10:6443`
-- **NAT Gateway Management**: `192.168.0.200`
+- **OpenWrt Web UI**: `http://10.10.0.200` (LuCI interface)
+- **OpenWrt SSH**: `ssh root@10.10.0.200`
 - **Cluster Network**: `10.10.0.0/24`
 
 ## 🔑 Access the Cluster
 
 1. **Get Kubeconfig**:
    ```bash
-   # The kubeconfig will be in Terraform outputs
-   # You can retrieve it after deployment
+   cd environments/dev/terraform
+   export KUBECONFIG=./kubeconfig.yaml
+   kubectl get nodes
    ```
 
-2. **Access via kubectl**:
+2. **Get Talos Configuration**:
    ```bash
-   export KUBECONFIG=/path/to/kubeconfig
-   kubectl get nodes
+   export TALOSCONFIG=./talos_client_configuration.yaml
+   talosctl get nodes
+   ```
+
+3. **Access OpenWrt NAT Gateway**:
+   ```bash
+   # Web interface
+   open http://10.10.0.200
+   
+   # SSH access
+   ssh root@10.10.0.200
    ```
 
 ## 🛠️ Customization
 
 ### Adding More Nodes
 
-Edit `ansible/group_vars/dev_talos/main.yaml`:
+Edit `terraform/terraform.tfvars`:
 
-```yaml
+```hcl
 # Add more control planes
-control_plane_count: 5
-control_plane_vm_ids: [101, 102, 103, 104, 105]
-control_plane_ips: ["10.10.0.10", "10.10.0.11", "10.10.0.12", "10.10.0.13", "10.10.0.14"]
+control_plane_count = 5
+control_plane_vm_ids = [101, 102, 103, 104, 105]
+control_plane_ips = ["10.10.0.10", "10.10.0.11", "10.10.0.12", "10.10.0.13", "10.10.0.14"]
 
 # Add more workers
-worker_count: 5
-worker_vm_ids: [201, 202, 203, 204, 205]
-worker_ips: ["10.10.0.20", "10.10.0.21", "10.10.0.22", "10.10.0.23", "10.10.0.24"]
+worker_count = 5
+worker_vm_ids = [201, 202, 203, 204, 205]
+worker_ips = ["10.10.0.20", "10.10.0.21", "10.10.0.22", "10.10.0.23", "10.10.0.24"]
 ```
 
 ### Changing Network Configuration
 
-Update the network variables in `ansible/group_vars/dev_talos/main.yaml`:
+Update the network variables in `terraform/terraform.tfvars`:
 
-```yaml
-talos_network_cidr: "10.20.0.0/24"
-talos_network_gateway: "10.20.0.1"
+```hcl
+talos_network_cidr = "10.20.0.0/24"
+talos_network_gateway = "10.20.0.1"
 # Update all IP addresses accordingly
 ```
 
 ### Disabling NAT Gateway
 
-Set `enable_nat_gateway: false` in the configuration if you want to use a different internet access method.
+Set `enable_nat_gateway = false` in `terraform/terraform.tfvars` if you want to use a different internet access method.
 
 ## 🔍 Troubleshooting
 
 ### Common Issues
 
-1. **Terraform Module Not Found**:
+1. **OpenTofu Module Not Found**:
    ```bash
    cd environments/dev/terraform
    tofu init
    ```
 
-2. **SSH Tunnel Issues**:
-   - Check if port 5801 is available
-   - Verify SSH connectivity to pve02
+2. **Proxmox API Issues**:
+   - Verify Proxmox API URL and credentials
+   - Check if Proxmox node is accessible
+   - Ensure storage pools exist
 
-3. **Storage Pool Issues**:
-   - Verify `proxmox_default_storage_pool` exists
-   - Check Proxmox storage configuration
+3. **Network Issues**:
+   - Verify IP addresses are not in use
+   - Check if bridge vmbr1 exists
+   - Ensure OpenWrt image is available
+
+4. **Storage Pool Issues**:
+   - Verify storage pools exist in Proxmox
+   - Check available disk space
+   - Ensure proper permissions
 
 ### Logs
 
-- **Ansible**: Check `ansible.log` in the dev directory
-- **Terraform**: Check Terraform output in the playbook execution
+- **OpenTofu**: Check `tofu apply` output for detailed error messages
 - **Proxmox**: Check Proxmox logs for VM creation issues
+- **Talos**: Use `talosctl logs` to check node status
+- **OpenWrt**: SSH to NAT gateway and check system logs
 
 ## 📚 Additional Resources
 
 - [Talos Linux Documentation](https://www.talos.dev/)
 - [Proxmox VE Documentation](https://pve.proxmox.com/wiki/Main_Page)
+- [OpenTofu Documentation](https://opentofu.org/docs/)
+- [OpenWrt Documentation](https://openwrt.org/docs/start)
 - [Terraform Proxmox Provider](https://registry.terraform.io/providers/bpg/proxmox/latest/docs)
 

@@ -12,6 +12,7 @@ This Terraform module creates network infrastructure for a Talos Kubernetes clus
 - 🌐 Support for both management and cluster networks
 - 🚀 Automatic NAT gateway configuration for internet access
 - 📝 Beautiful emoji-based VM descriptions for quick identification
+- 🔐 SSH tunnel support for remote access
 
 ## Usage
 
@@ -40,17 +41,17 @@ module "talos_network" {
   enable_nat_gateway = true
   nat_gateway_vm_id = 200
   nat_gateway_management_ip = "192.168.0.200"
-  nat_gateway_cluster_ip = "10.10.0.1"  # Gateway for Talos cluster
-  nat_gateway_password = "your-secure-password"  # OpenWrt root password
+  nat_gateway_cluster_ip = "10.10.0.200"  # Gateway for Talos cluster
+  nat_gateway_password = "ChangeMe123!"  # OpenWrt root password
   openwrt_version = "23.05.5"  # OpenWrt version to install
-  iso_pool = "local"  # Storage pool for OpenWrt image
+  iso_pool = "storage-isos"  # Storage pool for OpenWrt image
 
   # Firewall configuration
   enable_firewall = true
 }
 ```
 
-### Without Load Balancer
+### Without NAT Gateway
 
 ```hcl
 module "talos_network" {
@@ -71,7 +72,7 @@ module "talos_network" {
   management_network_cidr = "192.168.0.0/24"
   management_gateway = "192.168.0.1"
 
-  # Disable load balancer
+  # Disable NAT gateway
   enable_nat_gateway = false
 
   # Firewall configuration
@@ -111,11 +112,11 @@ module "talos_network" {
 | nat_gateway_vm_id | VM ID for the NAT gateway | `number` | `200` | no |
 | nat_gateway_management_ip | Management IP for the NAT gateway (WAN interface) | `string` | n/a | yes |
 | nat_gateway_cluster_ip | Cluster network IP for the NAT gateway (LAN interface) | `string` | n/a | yes |
-| nat_gateway_password | Root password for OpenWrt NAT gateway | `string` | `"openwrt"` | no |
+| nat_gateway_password | Root password for OpenWrt NAT gateway | `string` | `"ChangeMe123!"` | no |
 | openwrt_version | OpenWrt version to install | `string` | `"23.05.5"` | no |
-| iso_pool | Storage pool for ISO images | `string` | `"local"` | no |
+| iso_pool | Storage pool for ISO images | `string` | `"storage-isos"` | no |
 | talos_control_plane_ips | List of control plane IP addresses for load balancing | `list(string)` | `[]` | no |
-| ssh_public_keys | List of SSH public keys for load balancer access | `list(string)` | `[]` | no |
+| ssh_public_keys | List of SSH public keys for access | `list(string)` | `[]` | no |
 | enable_firewall | Enable firewall rules for Talos cluster network | `bool` | `true` | no |
 
 ## Outputs

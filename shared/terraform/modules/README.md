@@ -1,13 +1,12 @@
 # Talos Cluster Terraform Modules
 
-This directory contains Terraform modules for deploying Talos Kubernetes clusters on Proxmox using Packer-built templates.
+This directory contains Terraform modules for deploying Talos Kubernetes clusters on Proxmox with OpenWrt NAT gateway support.
 
 ## Module Structure
 
 ```
 modules/
 ├── talos-vm/           # Individual Talos VM module
-│   ├── packer/         # Packer templates for building Talos images
 │   ├── main.tf         # VM creation and Talos configuration
 │   ├── variables.tf    # Module variables
 │   ├── outputs.tf      # Module outputs
@@ -19,24 +18,13 @@ modules/
 │   ├── outputs.tf      # Module outputs
 │   └── README.md       # Module documentation
 ├── talos-network/      # Network infrastructure module
-│   ├── templates/      # Cloud-init templates
-│   ├── main.tf         # Bridge, firewall, and load balancer
+│   ├── templates/      # OpenWrt configuration templates
+│   ├── main.tf         # Bridge, firewall, and NAT gateway
 │   ├── variables.tf    # Module variables
 │   ├── outputs.tf      # Module outputs
 │   └── README.md       # Module documentation
-├── talos-loadbalancer/ # Dedicated load balancer module
-│   ├── templates/      # Cloud-init templates
-│   ├── main.tf         # Load balancer VM creation
-│   ├── variables.tf    # Module variables
-│   ├── outputs.tf      # Module outputs
-│   └── README.md       # Module documentation
-├── talos-image-factory/ # Custom Talos image creation module
-│   ├── main.tf         # Image factory resources
-│   ├── variables.tf    # Module variables
-│   ├── outputs.tf      # Module outputs
-│   └── README.md       # Module documentation
-└── talos-vm-template/  # VM template creation module
-    ├── main.tf         # Template creation with image factory
+└── openwrt-router/     # OpenWrt router module
+    ├── main.tf         # OpenWrt VM creation and configuration
     ├── variables.tf    # Module variables
     ├── outputs.tf      # Module outputs
     └── README.md       # Module documentation
@@ -44,16 +32,7 @@ modules/
 
 ## Quick Start
 
-### 1. Build Talos Template with Packer
-
-```bash
-cd modules/talos-vm/packer
-export PKR_VAR_proxmox_token="your-proxmox-api-token"
-packer init .
-packer build .
-```
-
-### 2. Deploy Complete Cluster
+### 1. Deploy Complete Cluster
 
 ```hcl
 module "talos_cluster" {
@@ -63,7 +42,7 @@ module "talos_cluster" {
   cluster_name = "dev-cluster"
   proxmox_node = "pve02"
   storage_pool = "local-zfs"
-  template_vm_id = 9999  # Packer-built template
+  template_vm_id = 100  # Talos template VM ID
 
   # Node configuration
   control_plane_count = 3
@@ -71,11 +50,11 @@ module "talos_cluster" {
 
   # Control plane configuration
   control_plane_ips = ["10.10.0.10", "10.10.0.11", "10.10.0.12"]
-  control_plane_vm_ids = [100, 101, 102]
+  control_plane_vm_ids = [101, 102, 103]
 
   # Worker configuration
   worker_ips = ["10.10.0.20", "10.10.0.21", "10.10.0.22"]
-  worker_vm_ids = [120, 121, 122]
+  worker_vm_ids = [201, 202, 203]
 
   # Network configuration
   talos_network_cidr = "10.10.0.0/24"
@@ -83,30 +62,32 @@ module "talos_cluster" {
   management_network_cidr = "192.168.0.0/24"
   management_gateway = "192.168.0.1"
 
-  # Load balancer configuration
-  enable_load_balancer = true
-  load_balancer_vm_id = 200
-  load_balancer_management_ip = "192.168.0.200"
-  load_balancer_cluster_ip = "10.10.0.200"
-  ssh_public_keys = ["ssh-rsa AAAAB3NzaC1yc2E... user@host"]
+  # NAT gateway configuration
+  enable_nat_gateway = true
+  nat_gateway_vm_id = 200
+  nat_gateway_management_ip = "192.168.0.200"
+  nat_gateway_cluster_ip = "10.10.0.200"
+  nat_gateway_password = "ChangeMe123!"
+  openwrt_version = "23.05.5"
+  iso_pool = "storage-isos"
 }
 ```
 
-### 3. Access the Cluster
+### 2. Access the Cluster
 
 ```bash
 # Get kubeconfig
-terraform output -raw kubeconfig > kubeconfig
+tofu output -raw kubeconfig > kubeconfig.yaml
 
 # Get talosconfig
-terraform output -raw talosconfig > talosconfig
+tofu output -raw talosconfig > talos_client_configuration.yaml
 
 # Use kubectl
-export KUBECONFIG=./kubeconfig
+export KUBECONFIG=./kubeconfig.yaml
 kubectl get nodes
 
 # Use talosctl
-export TALOSCONFIG=./talosconfig
+export TALOSCONFIG=./talos_client_configuration.yaml
 talosctl get nodes
 ```
 
@@ -114,13 +95,14 @@ talosctl get nodes
 
 ### talos-vm Module
 
-Creates individual Talos VMs from Packer-built templates.
+Creates individual Talos VMs from existing templates.
 
 **Features:**
 - VM creation from templates
 - Talos configuration generation
-- Static IP or DHCP networking
+- Static IP networking
 - Configurable resources
+- Automatic Talos configuration application
 
 **Usage:**
 ```hcl
@@ -129,7 +111,7 @@ module "talos_vm" {
   
   vm_name = "talos-cp-1"
   vm_id = 100
-  template_vm_id = 9999
+  template_vm_id = 100
   
   # ... other configuration
 }
@@ -141,10 +123,10 @@ Orchestrates complete cluster deployment.
 
 **Features:**
 - Multiple control plane and worker nodes
-- Network infrastructure
-- Optional load balancer
+- Network infrastructure with OpenWrt NAT gateway
 - Cluster bootstrapping
 - Kubeconfig generation
+- Automatic Talos configuration
 
 **Usage:**
 ```hcl
@@ -156,15 +138,16 @@ module "talos_cluster" {
 }
 ```
 
-### network Module
+### talos-network Module
 
 Creates network infrastructure for the cluster.
 
 **Features:**
 - Dedicated network bridges
+- OpenWrt NAT gateway with automatic configuration
 - Firewall rules
-- Optional load balancer VM
 - Network isolation
+- SSH-based OpenWrt configuration
 
 **Usage:**
 ```hcl
@@ -176,88 +159,24 @@ module "network" {
 }
 ```
 
-### talos-loadbalancer Module
+### openwrt-router Module
 
-Creates dedicated load balancer VMs.
+Creates OpenWrt router VMs for NAT gateway functionality.
 
 **Features:**
-- HAProxy for load balancing
-- Keepalived for high availability
-- Health checks
-- Statistics interface
+- OpenWrt VM creation
+- Automatic network configuration via SSH
+- NAT masquerading
+- Firewall rules
+- Web UI access
 
 **Usage:**
 ```hcl
-module "load_balancer" {
-  source = "./modules/talos-loadbalancer"
+module "openwrt_router" {
+  source = "./modules/openwrt-router"
   
-  cluster_name = "dev-cluster"
-  # ... other configuration
-}
-```
-
-### talos-image-factory Module
-
-Creates custom Talos Linux images using the Talos Image Factory API.
-
-**Features:**
-- Custom system extensions
-- Reproducible builds
-- Reduced bootstrap time
-- Hardware optimization
-- Proxmox integration
-
-**Usage:**
-```hcl
-module "talos_image_factory" {
-  source = "./modules/talos-image-factory"
-  
-  talos_version = "1.9.5"
-  proxmox_node  = "pve02"
-  iso_pool      = "storage-isos"
-  
-  # Custom extensions
-  system_extensions = [
-    "siderolabs/intel-ucode",
-    "siderolabs/qemu-guest-agent",
-    "siderolabs/util-linux-tools"
-  ]
-  
-  # ... other configuration
-}
-```
-
-### talos-vm-template Module
-
-Creates Talos VM templates using custom images from talos-image-factory.
-
-**Features:**
-- Custom Talos images with system extensions
-- Shut down VM template ready for cloning
-- Hardware configuration options
-- Beautiful emoji descriptions
-- QEMU agent pre-configured
-
-**Usage:**
-```hcl
-module "talos_vm_template" {
-  source = "./modules/talos-vm-template"
-  
-  talos_version = "1.9.5"
-  proxmox_node  = "pve02"
-  iso_pool      = "storage-isos"
-  storage_pool  = "local-zfs"
-  
-  template_name   = "talos-template-v1.9.5"
-  template_vm_id  = 9999
-  
-  # Custom extensions
-  system_extensions = [
-    "siderolabs/intel-ucode",
-    "siderolabs/qemu-guest-agent",
-    "siderolabs/util-linux-tools"
-  ]
-  
+  vm_name = "openwrt-nat-gateway"
+  vm_id = 200
   # ... other configuration
 }
 ```
@@ -266,14 +185,14 @@ module "talos_vm_template" {
 
 ### Required Software
 
-- **Terraform** >= 1.0
-- **Packer** >= 1.8.0
+- **OpenTofu** >= 1.6 (or Terraform >= 1.0)
 - **Proxmox** with API access
-- **Talos** >= 0.3.0
+- **Talos** >= 1.9.0
+- **OpenWrt** image for NAT gateway
 
 ### Required Permissions
 
-- Proxmox API token with VM creation permissions
+- Proxmox API access with VM creation permissions
 - Network bridge creation permissions
 - Firewall rule management permissions
 
@@ -283,6 +202,7 @@ module "talos_vm_template" {
 - Proxmox storage pool for ISOs
 - Network bridges (vmbr0, vmbr1)
 - IP address ranges for management and cluster networks
+- Talos template VM (ID 100)
 
 ## Configuration Examples
 
@@ -295,17 +215,17 @@ module "dev_cluster" {
   cluster_name = "dev-cluster"
   proxmox_node = "pve02"
   storage_pool = "local-zfs"
-  template_vm_id = 9999
+  template_vm_id = 100
 
   # Minimal configuration
   control_plane_count = 1
   worker_count = 2
 
   control_plane_ips = ["10.10.0.10"]
-  control_plane_vm_ids = [100]
+  control_plane_vm_ids = [101]
 
   worker_ips = ["10.10.0.20", "10.10.0.21"]
-  worker_vm_ids = [120, 121]
+  worker_vm_ids = [201, 202]
 
   # Network configuration
   talos_network_cidr = "10.10.0.0/24"
@@ -313,8 +233,14 @@ module "dev_cluster" {
   management_network_cidr = "192.168.0.0/24"
   management_gateway = "192.168.0.1"
 
-  # Disable load balancer for dev
-  enable_load_balancer = false
+  # NAT gateway configuration
+  enable_nat_gateway = true
+  nat_gateway_vm_id = 200
+  nat_gateway_management_ip = "192.168.0.200"
+  nat_gateway_cluster_ip = "10.10.0.200"
+  nat_gateway_password = "ChangeMe123!"
+  openwrt_version = "23.05.5"
+  iso_pool = "storage-isos"
 }
 ```
 
@@ -327,20 +253,20 @@ module "prod_cluster" {
   cluster_name = "prod-cluster"
   proxmox_node = "pve02"
   storage_pool = "local-zfs"
-  template_vm_id = 9999
+  template_vm_id = 100
 
   # High availability configuration
   control_plane_count = 3
   worker_count = 5
 
   control_plane_ips = ["10.10.0.10", "10.10.0.11", "10.10.0.12"]
-  control_plane_vm_ids = [100, 101, 102]
+  control_plane_vm_ids = [101, 102, 103]
   control_plane_cores = 4
   control_plane_memory = 8192
   control_plane_disk_size = "100G"
 
   worker_ips = ["10.10.0.20", "10.10.0.21", "10.10.0.22", "10.10.0.23", "10.10.0.24"]
-  worker_vm_ids = [120, 121, 122, 123, 124]
+  worker_vm_ids = [201, 202, 203, 204, 205]
   worker_cores = 8
   worker_memory = 16384
   worker_disk_size = "200G"
@@ -351,15 +277,14 @@ module "prod_cluster" {
   management_network_cidr = "192.168.0.0/24"
   management_gateway = "192.168.0.1"
 
-  # Load balancer configuration
-  enable_load_balancer = true
-  load_balancer_vm_id = 200
-  load_balancer_management_ip = "192.168.0.200"
-  load_balancer_cluster_ip = "10.10.0.200"
-  ssh_public_keys = [
-    "ssh-rsa AAAAB3NzaC1yc2E... admin@host1",
-    "ssh-rsa AAAAB3NzaC1yc2E... admin@host2"
-  ]
+  # NAT gateway configuration
+  enable_nat_gateway = true
+  nat_gateway_vm_id = 200
+  nat_gateway_management_ip = "192.168.0.200"
+  nat_gateway_cluster_ip = "10.10.0.200"
+  nat_gateway_password = "SecurePassword123!"
+  openwrt_version = "23.05.5"
+  iso_pool = "storage-isos"
 }
 ```
 
@@ -367,10 +292,11 @@ module "prod_cluster" {
 
 ### Security
 
-- Use strong passwords for HAProxy statistics
+- Use strong passwords for OpenWrt NAT gateway
 - Restrict SSH access to specific IP ranges
 - Enable firewall rules for network isolation
 - Use static IP addresses for production deployments
+- Encrypt secrets using SOPS
 
 ### Performance
 
@@ -382,13 +308,13 @@ module "prod_cluster" {
 ### Reliability
 
 - Use odd number of control plane nodes (3 or 5)
-- Enable load balancer for high availability
+- Enable NAT gateway for internet access
 - Use dedicated network bridges for isolation
 - Implement backup and disaster recovery procedures
 
 ### Monitoring
 
-- Access HAProxy statistics for load balancer monitoring
+- Access OpenWrt web interface for network monitoring
 - Use Talos and Kubernetes monitoring tools
 - Monitor cluster health and performance metrics
 - Set up alerting for critical issues
@@ -397,11 +323,11 @@ module "prod_cluster" {
 
 ### Common Issues
 
-1. **Template not found** - Ensure Packer template exists with correct VM ID
+1. **Template not found** - Ensure Talos template exists with correct VM ID
 2. **IP conflicts** - Verify IP addresses are not in use
 3. **VM ID conflicts** - Ensure VM IDs are unique
 4. **Network issues** - Check bridge configuration and firewall rules
-5. **Load balancer issues** - Verify HAProxy and Keepalived configuration
+5. **OpenWrt configuration issues** - Verify SSH access and network configuration
 
 ### Debug Commands
 
@@ -412,8 +338,10 @@ talosctl get nodes
 # Check cluster health
 kubectl get nodes -o wide
 
-# Check load balancer status
-curl http://<load_balancer_ip>:8404/stats
+# Check OpenWrt NAT gateway
+ssh root@<nat_gateway_ip>
+uci show network
+uci show firewall
 
 # Check Proxmox resources
 pvesh get /cluster/resources
@@ -421,7 +349,7 @@ pvesh get /cluster/resources
 
 ## Contributing
 
-1. Follow Terraform best practices
+1. Follow OpenTofu/Terraform best practices
 2. Update documentation for any changes
 3. Test modules in development environment
 4. Use consistent naming conventions
