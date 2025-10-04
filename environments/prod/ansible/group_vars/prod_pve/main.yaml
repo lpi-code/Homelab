@@ -1,4 +1,11 @@
 ---
-# Production Proxmox VE group variables
+# Production Proxmox VE Configuration
+# Variables specific to Proxmox hosts
 
-cluster_role: pve
+# Node Role Configuration
+cluster_role: "pve"
+
+# Proxmox Specific Settings
+proxmox_cluster_enabled: true
+proxmox_ha_enabled: true
+proxmox_backup_enabled: true

@@ -1,0 +1,50 @@
+---
+# 🚀 Talos Cluster Configuration for Production Environment
+# Single source of truth for prod-talos cluster variables
+
+# Basic Configuration
+cluster_name: "prod-talos"
+talos_version: "1.9.5"
+
+# Node Configuration
+control_plane_count: 3
+worker_count: 5
+
+# Control Plane Configuration
+control_plane_vm_ids: [301, 302, 303]
+control_plane_ips: ["192.168.3.10", "192.168.3.11", "192.168.3.12"]
+control_plane_cores: 8
+control_plane_memory: 16384
+control_plane_disk_size: "100G"
+
+# Worker Configuration
+worker_vm_ids: [401, 402, 403, 404, 405]
+worker_ips: ["192.168.3.20", "192.168.3.21", "192.168.3.22", "192.168.3.23", "192.168.3.24"]
+worker_cores: 8
+worker_memory: 32768
+worker_disk_size: "200G"
+
+# Network Configuration
+bridge_name: "vmbr3"
+talos_network_cidr: "192.168.3.0/24"
+talos_network_gateway: "192.168.3.1"
+management_network_cidr: "192.168.0.0/24"
+management_gateway: "192.168.0.1"
+
+# NAT Gateway Configuration
+enable_nat_gateway: true
+nat_gateway_vm_id: 300
+nat_gateway_management_ip: "192.168.0.300/24"
+nat_gateway_cluster_ip: "192.168.3.300/24"
+openwrt_version: "23.05.5"
+
+# Firewall Configuration
+enable_firewall: true
+
+# SSH Configuration
+ssh_public_keys:
+  - "{{ ansible_user }}@{{ ansible_host }}"
+
+# Production-specific settings
+proxmox_default_storage_pool: "local-zfs"
+template_vm_id: 200
