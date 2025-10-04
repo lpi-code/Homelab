@@ -217,21 +217,22 @@ When enabled, the following firewall rules are created:
 - **Kubernetes API access** (port 6443)
 - **etcd access** (ports 2379-2380)
 - **Node-to-node communication** (TCP and UDP)
-- **Load balancer access** from management network
+- **NAT gateway access** from management network
 
 ## Integration
 
 This module is designed to work with:
 - **talos-cluster module** - For complete cluster deployment
 - **talos-vm module** - For individual VM creation
-- **loadbalancer module** - For advanced load balancing scenarios
+- **openwrt-router module** - For NAT gateway functionality
 
 ## Notes
 
 - The bridge is created with autostart enabled
-- Load balancer VM uses cloud-init for configuration
+- OpenWrt VM uses SSH-based configuration
 - Firewall rules are applied at the Proxmox node level
 - The module supports both IPv4 and future IPv6 configurations
-- Load balancer configuration is optimized for Talos and Kubernetes
+- NAT gateway configuration is optimized for Talos and Kubernetes
+- SSH tunnels are configured for remote access
 
 
