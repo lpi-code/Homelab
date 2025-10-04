@@ -1,0 +1,381 @@
+---
+- name: Deploy Talos Kubernetes Cluster with Terraform
+  hosts: dev_talos
+  become: yes
+  gather_facts: no
+  collections:
+    - community.general
+  
+  vars:
+    token_name: "{{ terraform_vars.token_name | default('terraform-talos-token') }}"
+    # Tunnel configuration
+    tunnel_local_port: "{{ terraform_vars.tunnel_local_port | default(5801) }}"
+    tunnel_remote_host: "{{ inventory_hostname }}"
+    tunnel_remote_port: "{{ terraform_vars.tunnel_remote_port | default(8006) }}"
+    tunnel_pid_file: "/tmp/terraform_talos_tunnel_{{ terraform_vars.tunnel_local_port | default(5801) }}.pid"
+    
+    # Node tunnel configuration - each node gets a unique local port
+    control_plane_tunnel_ports: "{{ range(5802, 5802 + (control_plane_count | default(3))) | list }}"
+    worker_tunnel_ports: "{{ range(5802 + (control_plane_count | default(3)), 5802 + (control_plane_count | default(3)) + (worker_count | default(3))) | list }}"
+    
+    # Node IP addresses for tunnel setup
+    control_plane_ips: ['10.10.0.10', '10.10.0.11', '10.10.0.12']
+    worker_ips: ['10.10.0.20', '10.10.0.21', '10.10.0.22']
+    
+    openwrt_template_file_id: "local:vztmpl/openwrt-template.tar.gz"
+    talos_image_file_id: "{{ proxmox_default_iso_pool }}:import/talos.qcow2"
+    # Terraform variables - define all required variables here instead of using tfvars
+    terraform_variables:
+      # Proxmox configuration
+      proxmox_host: "{{ inventory_hostname }}"
+      proxmox_node: "{{ proxmox_node | default('pve02') }}"
+      proxmox_user: "{{ proxmox_user }}@pve"
+      proxmox_password: "{{ proxmox_password }}"
+      proxmox_tls_insecure: "{{ proxmox_tls_insecure | default(true) }}"
+      
+      # Cluster configuration
+      cluster_name: "{{ cluster_name | default('talos-cluster') }}"
+      environment: "{{ environment | default('dev') }}"
+      
+      # VM configuration
+      control_plane_count: "{{ control_plane_count | default(3) }}"
+      worker_count: "{{ worker_count | default(3) }}"
+      
+      # VM IDs - use different IDs to avoid conflicts with existing VMs
+      control_plane_vm_ids: "{{ control_plane_vm_ids | default('[301, 302, 303]') }}"
+      worker_vm_ids: "{{ worker_vm_ids | default('[401, 402, 403]') }}"
+      nat_gateway_vm_id: "{{ nat_gateway_vm_id | default(300) }}"
+      
+      # VM specifications
+      control_plane_memory: "{{ control_plane_memory | default(4096) }}"
+      control_plane_cores: "{{ control_plane_cores | default(2) }}"
+      worker_memory: "{{ worker_memory | default(8192) }}"
+      worker_cores: "{{ worker_cores | default(4) }}"
+      nat_gateway_memory: "{{ nat_gateway_memory | default(1024) }}"
+      nat_gateway_cores: "{{ nat_gateway_cores | default(1) }}"
+      
+      # Storage configuration
+      vm_disk_size: "{{ vm_disk_size | default('32G') }}"
+      storage_pool: "{{ proxmox_default_storage_pool }}"
+      
+      # Network configuration
+      talos_network_cidr: "{{ talos_network_cidr | default('10.0.0.0/16') }}"
+      nat_gateway_enabled: "{{ enable_nat_gateway | default(false) }}"
+      
+      # Talos configuration
+      talos_version: "{{ talos_version | default('v1.7.0') }}"
+      kubernetes_version: "{{ kubernetes_version | default('v1.29.0') }}"
+      
+      # SSH configuration
+      ssh_public_keys: "{{ ssh_public_keys | default('[]') }}"
+
+      # Tunnel configuration
+      tunnel_local_port: "{{ tunnel_local_port }}"
+      
+      # Node tunnel configuration
+      control_plane_tunnel_ports: "{{ control_plane_tunnel_ports }}"
+      worker_tunnel_ports: "{{ worker_tunnel_ports }}"
+      
+      # Node IP addresses for tunnel setup
+      control_plane_ips: "{{ control_plane_ips }}"
+      worker_ips: "{{ worker_ips }}"
+  
+
+  pre_tasks:
+
+    - name: Check if storage pool exists
+      command: pvesm status
+      register: storage_status
+      changed_when: false
+      
+    - name: Extract available storage pool names
+      set_fact:
+        available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify storage pool is available
+      fail:
+        msg: "Storage pool '{{ proxmox_default_storage_pool }}' not found. Available pools: {{ available_storage_pools }}"
+      when: proxmox_default_storage_pool is not defined or proxmox_default_storage_pool not in available_storage_pools
+
+    - name: Check if terraform directory exists
+      stat:
+        path: "{{ terraform_dir }}"
+      register: terraform_dir_stat
+      changed_when: false
+      delegate_to: localhost
+      become: no
+    
+    - name: Fail if terraform directory does not exist
+      fail:
+        msg: "Terraform directory does not exist"
+      when: not terraform_dir_stat.stat.exists
+      delegate_to: localhost
+      become: no
+
+
+
+
+    # SSH Tunnel Setup for Terraform Proxy
+    - name: Check if tunnel port is available
+      wait_for:
+        port: "{{ tunnel_local_port }}"
+        state: stopped
+        timeout: 1
+      register: tunnel_port_check
+      delegate_to: localhost
+      become: no
+      ignore_errors: true
+      changed_when: false
+      
+    - name: Fail if tunnel port is already in use
+      fail:
+        msg: "Port {{ tunnel_local_port }} is already in use. Please choose a different port or stop the service using it."
+      when: tunnel_port_check.failed
+      delegate_to: localhost
+      become: no
+      
+    - name: Create SOCKS proxy tunnel to PVE node
+      shell: |
+        ssh -f -N -D {{ tunnel_local_port }} {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+        echo $! > {{ tunnel_pid_file }}
+      register: tunnel_create_result
+      delegate_to: localhost
+      become: no
+
+    - name: Wait for tunnel to be ready
+      wait_for:
+        port: "{{ tunnel_local_port }}"
+        host: "127.0.0.1"
+        timeout: 10
+      delegate_to: localhost
+      become: no
+
+    - name: Test SOCKS tunnel connectivity
+      shell: |
+        curl -s --socks5 127.0.0.1:{{ tunnel_local_port }} https://{{ inventory_hostname }}:8006/api2/json/version
+      register: tunnel_test
+      delegate_to: localhost
+      become: no
+      ignore_errors: true
+      changed_when: false
+      
+    - name: Display tunnel test results
+      debug:
+        msg: 
+          - "SOCKS tunnel test result: {{ tunnel_test.stdout if tunnel_test.stdout is defined else 'Failed' }}"
+      delegate_to: localhost
+      become: no
+      when: ansible_check_mode == true
+
+    # Setup temporary SSH tunnels for each node
+    - name: Create node tunnel configuration
+      set_fact:
+        node_tunnels: |
+          {%- set tunnels = [] -%}
+          {%- for i in range(control_plane_ips | length) -%}
+            {%- set _ = tunnels.append({
+              'name': 'cp-' + (i + 1) | string,
+              'port': control_plane_tunnel_ports[i],
+              'ip': control_plane_ips[i],
+              'type': 'controlplane'
+            }) -%}
+          {%- endfor -%}
+          {%- for i in range(worker_ips | length) -%}
+            {%- set _ = tunnels.append({
+              'name': 'worker-' + (i + 1) | string,
+              'port': worker_tunnel_ports[i],
+              'ip': worker_ips[i],
+              'type': 'worker'
+            }) -%}
+          {%- endfor -%}
+          {{ tunnels | to_nice_json }}
+      delegate_to: localhost
+      become: no
+
+    - name: Check if node tunnel ports are available
+      wait_for:
+        port: "{{ item.port }}"
+        state: stopped
+        timeout: 1
+      register: node_tunnel_port_check
+      delegate_to: localhost
+      become: no
+      ignore_errors: true
+      changed_when: false
+      loop: "{{ node_tunnels | from_json }}"
+
+    - name: Fail if any node tunnel port is already in use
+      fail:
+        msg: "Node tunnel port {{ item.item.port }} is already in use. Please choose different ports or stop the services using them."
+      when: item.failed
+      delegate_to: localhost
+      become: no
+      loop: "{{ node_tunnel_port_check.results }}"
+
+    - name: Create temporary SSH tunnels for all nodes
+      shell: |
+        ssh -f -N -L {{ item.port }}:{{ item.ip }}:50000 {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+        echo $! > /tmp/talos_tunnel_{{ item.name }}_{{ item.port }}.pid
+      register: tunnel_result
+      delegate_to: localhost
+      become: no
+      loop: "{{ node_tunnels | from_json }}"
+    
+    - name: Create temporary SSH tunnel for kubernetes API
+      shell: |
+        ssh -f -N -L 6443:{{ inventory_hostname }}:6443 {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+        echo $! > /tmp/talos_tunnel_kubernetes_api_{{ inventory_hostname }}.pid
+      register: tunnel_result
+      delegate_to: localhost
+      become: no
+      ignore_errors: true
+      changed_when: false
+
+    - name: Display tunnel setup information
+      debug:
+        msg:
+          - "🚇 Temporary SSH tunnels created:"
+          - "{{ item.type | title }} Node {{ item.name }}: {{ item.ip }} -> localhost:{{ item.port }}"
+      delegate_to: localhost
+      become: no
+      loop: "{{ node_tunnels | from_json }}"
+
+  tasks:
+    - name: debug openwrt_template_file_id
+      debug:
+        msg: "{{ openwrt_template_file_id }}"
+      delegate_to: localhost
+      become: no
+    # Generate terraform.tfvars file
+    - name: Generate terraform.tfvars file
+      ansible.builtin.template:
+        src: terraform.tfvars.j2
+        dest: "{{ terraform_dir }}/terraform.tfvars"
+        mode: '0600'
+      delegate_to: localhost
+      become: no
+    # Terraform execution tasks using community.general.terraform module with OpenTofu
+    - name: Apply the Talos Cluster Terraform configuration
+      block:
+        - name: Initialize Terraform with OpenTofu
+          ansible.builtin.command:
+            cmd: "tofu init -reconfigure -upgrade"
+            chdir: "{{ terraform_dir }}"
+          register: terraform_init_result
+          delegate_to: localhost
+          become: no
+                  
+
+        - name: Apply Terraform configuration
+          community.general.terraform:
+            project_path: "{{ terraform_dir }}"
+            binary_path: "/usr/bin/tofu"
+            workspace: "default"
+          environment:
+            http_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            https_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            HTTP_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            HTTPS_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+            no_proxy: "localhost,127.0.0.1,registry.opentofu.org"
+            NO_PROXY: "localhost,127.0.0.1,registry.opentofu.org"
+            # Proxmox provider configuration
+            PROXMOX_VE_ENDPOINT: "https://{{ inventory_hostname }}:8006/"
+            PROXMOX_VE_USERNAME: "{{ proxmox_user }}@pve"
+            PROXMOX_VE_PASSWORD: "{{ proxmox_password }}"
+            PROXMOX_VE_INSECURE: "true"
+          register: terraform_apply_result
+          delegate_to: localhost
+          become: no
+
+        - name: Display Terraform outputs
+          debug:
+            msg: "{{ terraform_apply_result.outputs }}"
+          delegate_to: localhost
+          become: no
+          when: terraform_apply_result.outputs is defined
+
+      always:
+        - name: Find PID of SOCKS tunnel process
+          ansible.builtin.pids:
+            pattern: "ssh -f -N -D {{ terraform_vars.tunnel_local_port | default(5801) }} {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          register: tunnel_pid
+          delegate_to: localhost
+          become: no
+        - name: Kill SOCKS tunnel process
+          ansible.builtin.command:
+            cmd: "kill -9 {{ item }}"
+          with_items: "{{ tunnel_pid.pids }}"
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+
+        - name: Find PIDs of node tunnel processes
+          ansible.builtin.pids:
+            pattern: "ssh -f -N -L {{ item.port }}:{{ item.ip }}:50000 {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          register: node_tunnel_pids
+          delegate_to: localhost
+          become: no
+          loop: "{{ node_tunnels | from_json }}"
+          ignore_errors: true
+
+        - name: Kill node tunnel processes
+          ansible.builtin.command:
+            cmd: "kill -9 {{ item }}"
+          with_items: "{{ node_tunnel_pids.results | selectattr('pids', 'defined') | map(attribute='pids') | flatten }}"
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+
+        - name: Clean up tunnel PID files
+          ansible.builtin.file:
+            path: "/tmp/talos_tunnel_{{ item.name }}_{{ item.port }}.pid"
+            state: absent
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+          loop: "{{ node_tunnels | from_json }}"
+
+        - name: Find PID of kubernetes API tunnel process
+          ansible.builtin.pids:
+            pattern: "ssh -f -N -L 6443:{{ inventory_hostname }}:6443 {{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          register: kubernetes_api_tunnel_pid
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+        - name: Kill kubernetes API tunnel process
+          ansible.builtin.command:
+            cmd: "kill -9 {{ item }}"
+          with_items: "{{ kubernetes_api_tunnel_pid.pids }}"
+          delegate_to: localhost
+          become: no
+          ignore_errors: true
+
+  post_tasks:
+    - name: Display cluster connection information
+      debug:
+        msg:
+          - "🚀 Talos cluster deployment completed!"
+          - "📊 Cluster Name: {{ cluster_name }}"
+          - "🌐 API Endpoint: {{ terraform_apply_result.outputs.cluster_endpoint.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+          - "🔧 NAT Gateway IP: {{ terraform_apply_result.outputs.nat_gateway_management_ip.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+          - "📋 Cluster Network: {{ terraform_apply_result.outputs.talos_network_cidr.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+          - "✅ Ready: {{ terraform_apply_result.outputs.cluster_ready.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+      when: terraform_apply_result.outputs is defined
+
+    - name: Display tunnel access information
+      debug:
+        msg:
+          - "🚇 SSH Tunnel Access Information:"
+          - "🎛️ Control Plane Nodes:"
+          - "   control_plane-1 -> localhost:{{ control_plane_tunnel_ports[0] }}"
+          - "   control_plane-2 -> localhost:{{ control_plane_tunnel_ports[1] if control_plane_tunnel_ports | length > 1 else 'N/A' }}"
+          - "   control_plane-3 -> localhost:{{ control_plane_tunnel_ports[2] if control_plane_tunnel_ports | length > 2 else 'N/A' }}"
+          - "⚙️ Worker Nodes:"
+          - "   worker-1 -> localhost:{{ worker_tunnel_ports[0] if worker_tunnel_ports | length > 0 else 'N/A' }}"
+          - "   worker-2 -> localhost:{{ worker_tunnel_ports[1] if worker_tunnel_ports | length > 1 else 'N/A' }}"
+          - "   worker-3 -> localhost:{{ worker_tunnel_ports[2] if worker_tunnel_ports | length > 2 else 'N/A' }}"
+          - ""
+          - "💡 To access a node via SSH tunnel:"
+          - "   ssh -L <local_port>:<node_ip>:22 root@localhost"
+          - "   Then: ssh root@localhost -p <local_port>"
+      when: terraform_apply_result.outputs is defined

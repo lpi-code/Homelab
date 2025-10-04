@@ -79,7 +79,7 @@
         - "Mapping.Audit"
         - "VM.GuestAgent.FileRead"
         - "Permissions.Modify"
-
+        # The following permissions are required and will be added if missing:
   tasks:
     - name: Get Proxmox version string
       ansible.builtin.command: pveversion

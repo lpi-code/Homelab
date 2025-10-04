@@ -1,0 +1,134 @@
+---
+- name: Create VM Templates with Packer
+  hosts: pve
+  become: yes
+  gather_facts: no
+  collections:
+    - community.general
+  vars:
+    packer_dir: "{{ lookup('env', 'SHARED_DIR_PATH') }}/packer"
+    talos_packer_config: "{{ packer_dir }}/talos/talos-template.pkr.hcl"
+    openwrt_packer_config: "{{ packer_dir }}/openwrt/openwrt-template.pkr.hcl"
+    proxmox_lxc_template_path: "{{ proxmox_default_lxc_template_path | default('/var/lib/vz/template/cache') }}"
+
+    # Template configuration
+    talos_template_name: "talos-template"
+    openwrt_template_name: "openwrt-template"
+    
+    # VM resource configuration (defaults)
+    talos_vm_memory_default: 2048
+    talos_vm_cores_default: 2
+    talos_vm_disk_size_default: "20G"
+    
+    openwrt_vm_memory_default: 512
+    openwrt_vm_cores_default: 1
+    openwrt_vm_disk_size_default: "4G"    
+    # Network configuration
+    vm_network_bridge_default: "vmbr0"
+    
+    # Version configuration (defaults)
+    talos_version_default: "1.8.0"
+    openwrt_version_default: "23.05.3"
+
+  pre_tasks:
+    - name: Check if Proxmox storage pools exist
+      command: pvesm status
+      register: storage_status
+      changed_when: false
+      
+    - name: Extract available storage pool names
+      set_fact:
+        available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify storage pool is available
+      fail:
+        msg: "Storage pool '{{ proxmox_default_iso_pool }}' not found. Available pools: {{ available_storage_pools }}"
+      when: proxmox_default_iso_pool is not defined or proxmox_default_iso_pool not in available_storage_pools
+
+    - name: Check if ISO storage pool exists
+      fail:
+        msg: "ISO storage pool 'storage-isos' not found. Available pools: {{ available_storage_pools }}"
+      when: '"storage-isos" not in available_storage_pools'
+    
+    - name: Create import directory
+      file:
+        path: "{{ proxmox_iso_path }}/import"
+        state: directory
+        mode: '0755'
+      register: import_directory_result
+
+  tasks:
+    - name: Generate Talos image using Image Factory
+      block:
+        - name: Generate Talos configuration
+          uri:
+            url: "https://factory.talos.dev/schematics"
+            method: POST
+            body_format: json
+            body:
+              customization:
+                systemExtensions:
+                  officialExtensions:
+                    - "siderolabs/intel-ucode"
+                    - "siderolabs/qemu-guest-agent"
+            status_code: [200, 201]
+          register: talos_config_response
+          delegate_to: localhost
+          become: no
+          
+        - name: Extract Talos image URL from response
+          set_fact:
+            talos_image_url: "https://factory.talos.dev/image/{{ talos_config_response.json.id }}/{{ talos_version | default(talos_version_default) }}/nocloud-amd64.qcow2"
+            
+        - name: Download Talos image (qcow2) (read-only)
+          get_url:
+            url: "{{ talos_image_url }}"
+            dest: "{{ proxmox_iso_path }}/import/talos.qcow2"
+            mode: '0444'
+            timeout: 600
+          register: talos_download_result
+
+    - name: Create OpenWrt LXC template
+      block:
+        - name: Check if OpenWrt LXC template exists
+          stat:
+            path: "{{ proxmox_lxc_template_path }}/vztmpl/openwrt-template.tar.gz"
+          register: openwrt_template_stat
+          
+        - name: Download OpenWrt LXC template
+          get_url:
+            # Download OpenWrt LXC template from official repository
+            url: "https://downloads.openwrt.org/releases/{{ openwrt_version | default(openwrt_version_default) }}/targets/x86/64/openwrt-{{ openwrt_version | default(openwrt_version_default) }}-x86-64-rootfs.tar.gz"
+            dest: "{{ proxmox_lxc_template_path }}/openwrt-template.tar.gz"
+            mode: '0644'
+            timeout: 300
+          when: not openwrt_template_stat.stat.exists
+          register: openwrt_template_download
+          
+  post_tasks:
+    - name: Verify VM templates were created
+      command: qm list --full
+      register: final_vm_templates
+      changed_when: false
+      
+    - name: Verify LXC templates were created
+      command: pveam available
+      register: final_lxc_templates
+      changed_when: false
+      
+    - name: Display created templates
+      debug:
+        msg: 
+          - "Available VM templates: {{ final_vm_templates.stdout_lines }}"
+          - "Available LXC templates: {{ final_lxc_templates.stdout_lines }}"
+        
+    - name: Set template facts for other playbooks
+      set_fact:
+        talos_template_available: "{{ talos_template_name in final_vm_templates.stdout }}"
+        openwrt_template_available: "{{ openwrt_template_stat.stat.exists }}"
+        
+    - name: Display template availability status
+      debug:
+        msg:
+          - "Talos VM template available: {{ talos_template_available }}"
+          - "OpenWrt LXC template available: {{ openwrt_template_available }}"
