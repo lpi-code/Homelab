@@ -1,6 +1,6 @@
 ---
 # 🚀 Talos Cluster Configuration for Development Environment
-# Variables for creating Talos Kubernetes cluster via Terraform
+# Single source of truth for dev-talos cluster variables
 
 # Basic Configuration
 cluster_name: "dev-talos"
@@ -44,59 +44,3 @@ enable_firewall: true
 # SSH Configuration
 ssh_public_keys:
   - "{{ ansible_user }}@{{ ansible_host }}"
-
-# Terraform Variables (will be passed to Terraform)
-terraform_variables:
-  # Basic Configuration
-  cluster_name: "{{ cluster_name }}"
-  proxmox_node: "{{ inventory_hostname }}"
-  storage_pool: "{{ proxmox_default_storage_pool }}"
-  template_vm_id: "{{ template_vm_id | default(100) }}"
-  target_host: "{{ cluster_name }}-vm"
-  vm_ip_address: "192.168.1.100"
-  
-  # Proxmox API Configuration
-  proxmox_api_url: "https://{{ inventory_hostname }}:8006/api2/json"
-  proxmox_user: "{{ proxmox_user }}@pve"
-  proxmox_password: "{{ proxmox_password }}"
-  proxmox_tls_insecure: "true"
-  
-  
-  # Talos Configuration
-  talos_version: "{{ talos_version }}"
-  
-  # Node Configuration
-  control_plane_count: "{{ control_plane_count }}"
-  worker_count: "{{ worker_count }}"
-  
-  # Control Plane Configuration
-  control_plane_vm_ids: "{{ control_plane_vm_ids | to_json }}"
-  control_plane_ips: "{{ control_plane_ips | to_json }}"
-  control_plane_cores: "{{ control_plane_cores }}"
-  control_plane_memory: "{{ control_plane_memory }}"
-  control_plane_disk_size: "{{ control_plane_disk_size }}"
-  
-  # Worker Configuration
-  worker_vm_ids: "{{ worker_vm_ids | to_json }}"
-  worker_ips: "{{ worker_ips | to_json }}"
-  worker_cores: "{{ worker_cores }}"
-  worker_memory: "{{ worker_memory }}"
-  worker_disk_size: "{{ worker_disk_size }}"
-  
-  # Network Configuration
-  bridge_name: "{{ bridge_name }}"
-  talos_network_cidr: "{{ talos_network_cidr }}"
-  talos_network_gateway: "{{ talos_network_gateway }}"
-  management_network_cidr: "{{ management_network_cidr }}"
-  management_gateway: "{{ management_gateway }}"
-  
-  # NAT Gateway Configuration
-  enable_nat_gateway: "{{ enable_nat_gateway | lower }}"
-  nat_gateway_vm_id: "{{ nat_gateway_vm_id }}"
-  nat_gateway_management_ip: "{{ nat_gateway_management_ip }}"
-  nat_gateway_cluster_ip: "{{ nat_gateway_cluster_ip }}"
-  openwrt_version: "{{ openwrt_version }}"
-  iso_pool: "storage-isos"
-  
-  # Firewall Configuration
-  enable_firewall: "{{ enable_firewall | lower }}"

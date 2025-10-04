@@ -1,6 +1,11 @@
 ---
-# Production Kubernetes Control Plane group variables
+# Production Kubernetes Control Plane Configuration
+# Variables specific to control plane nodes
 
-cluster_role: control-plane
-cluster_name: prod-cluster
-node_type: talos
+# Node Role Configuration
+cluster_role: "control-plane"
+node_type: "talos"
+
+# Control Plane Specific Settings
+control_plane_high_availability: true
+control_plane_backup_enabled: true
