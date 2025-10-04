@@ -1,0 +1,61 @@
+# Terraform Variables for Dev Environment
+# Copy this file to terraform.tfvars and update the values
+
+# Proxmox Configuration
+proxmox_api_url = "https://192.168.0.149:8006/"
+proxmox_user = "root@pam"
+proxmox_password = "your-proxmox-password"
+proxmox_tls_insecure = true
+proxmox_node = "pve02"
+storage_pool = "storage-vms"
+
+# Cluster Configuration
+cluster_name = "homelab"
+environment = "dev"
+
+# Talos Configuration
+talos_version = "1.9.5"
+template_vm_id = 100
+create_template = true
+
+# Node Configuration
+control_plane_count = 3
+worker_count = 3
+
+# Control Plane Configuration
+control_plane_vm_ids = [101, 102, 103]
+control_plane_ips = ["10.10.0.10", "10.10.0.11", "10.10.0.12"]
+control_plane_cores = 4
+control_plane_memory = 8192
+control_plane_disk_size = "50G"
+
+# Worker Configuration
+worker_vm_ids = [201, 202, 203]
+worker_ips = ["10.10.0.20", "10.10.0.21", "10.10.0.22"]
+worker_cores = 4
+worker_memory = 8192
+worker_disk_size = "50G"
+
+# Network Configuration
+bridge_name = "vmbr1"
+talos_network_cidr = "10.10.0.0/24"
+talos_network_gateway = "10.10.0.1"
+management_network_cidr = "192.168.0.0/24"
+management_gateway = "192.168.0.1"
+
+# NAT Gateway Configuration
+enable_nat_gateway = true
+nat_gateway_vm_id = 200
+nat_gateway_management_ip = "192.168.0.200"
+nat_gateway_cluster_ip = "10.10.0.200"
+nat_gateway_password = "ChangeMe123!"
+
+# OpenWrt Configuration
+openwrt_version = "23.05.5"
+iso_pool = "storage-isos"
+
+# Security Configuration
+enable_firewall = true
+
+# SSH Keys (optional)
+ssh_public_keys = []
