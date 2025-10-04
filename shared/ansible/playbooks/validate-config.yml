@@ -1,0 +1,203 @@
+---
+- name: Validate Talos Cluster Configuration
+  hosts: localhost
+  gather_facts: no
+  vars:
+    inventory_path: "{{ lookup('env', 'INVENTORY_PATH') | default('environments/dev/ansible/inventory/hosts.toml') }}"
+    group_vars_path: "{{ lookup('env', 'GROUP_VARS_PATH') | default('environments/dev/ansible/group_vars') }}"
+  
+  tasks:
+    - name: Check if inventory file exists
+      stat:
+        path: "{{ inventory_path }}"
+      register: inventory_stat
+      
+    - name: Fail if inventory file does not exist
+      fail:
+        msg: "Inventory file {{ inventory_path }} does not exist"
+      when: not inventory_stat.stat.exists
+      
+    - name: Load inventory
+      add_host:
+        name: "{{ item }}"
+        groups: "test_hosts"
+      loop: "{{ groups['dev_talos'] | default([]) }}"
+      when: groups['dev_talos'] is defined
+      
+    - name: Fail if no dev_talos group found
+      fail:
+        msg: "No dev_talos group found in inventory"
+      when: groups['dev_talos'] is not defined
+      
+    - name: Check if group_vars directory exists
+      stat:
+        path: "{{ group_vars_path }}"
+      register: group_vars_stat
+      
+    - name: Fail if group_vars directory does not exist
+      fail:
+        msg: "Group vars directory {{ group_vars_path }} does not exist"
+      when: not group_vars_stat.stat.exists
+
+- name: Validate Configuration Variables
+  hosts: test_hosts
+  gather_facts: no
+  tasks:
+    - name: Check required cluster variables
+      assert:
+        that:
+          - cluster_name is defined
+          - cluster_name | length > 0
+          - talos_version is defined
+          - talos_version | length > 0
+          - environment is defined
+          - environment | length > 0
+        fail_msg: "Missing required cluster variables"
+        
+    - name: Check node configuration
+      assert:
+        that:
+          - control_plane_count is defined
+          - control_plane_count > 0
+          - worker_count is defined
+          - worker_count >= 0
+          - control_plane_count <= 5
+        fail_msg: "Invalid node configuration"
+        
+    - name: Check VM IDs
+      assert:
+        that:
+          - control_plane_vm_ids is defined
+          - control_plane_vm_ids | length == control_plane_count
+          - worker_vm_ids is defined
+          - worker_vm_ids | length == worker_count
+          - nat_gateway_vm_id is defined
+        fail_msg: "Invalid VM ID configuration"
+        
+    - name: Check IP addresses
+      assert:
+        that:
+          - control_plane_ips is defined
+          - control_plane_ips | length == control_plane_count
+          - worker_ips is defined
+          - worker_ips | length == worker_count
+        fail_msg: "Invalid IP address configuration"
+        
+    - name: Check resource specifications
+      assert:
+        that:
+          - control_plane_cores is defined
+          - control_plane_cores > 0
+          - control_plane_memory is defined
+          - control_plane_memory > 0
+          - worker_cores is defined
+          - worker_cores > 0
+          - worker_memory is defined
+          - worker_memory > 0
+        fail_msg: "Invalid resource specifications"
+        
+    - name: Check network configuration
+      assert:
+        that:
+          - bridge_name is defined
+          - bridge_name | length > 0
+          - talos_network_cidr is defined
+          - talos_network_cidr | length > 0
+          - talos_network_gateway is defined
+          - talos_network_gateway | length > 0
+          - management_network_cidr is defined
+          - management_network_cidr | length > 0
+          - management_gateway is defined
+          - management_gateway | length > 0
+        fail_msg: "Invalid network configuration"
+        
+    - name: Check NAT gateway configuration
+      assert:
+        that:
+          - enable_nat_gateway is defined
+          - nat_gateway_vm_id is defined
+          - nat_gateway_management_ip is defined
+          - nat_gateway_cluster_ip is defined
+          - openwrt_version is defined
+        fail_msg: "Invalid NAT gateway configuration"
+        
+    - name: Check security configuration
+      assert:
+        that:
+          - enable_firewall is defined
+          - ssh_public_keys is defined
+          - ssh_public_keys | length > 0
+        fail_msg: "Invalid security configuration"
+        
+    - name: Check Proxmox configuration
+      assert:
+        that:
+          - proxmox_default_storage_pool is defined
+          - proxmox_default_storage_pool | length > 0
+        fail_msg: "Missing Proxmox configuration"
+        
+    - name: Check SOPS secrets
+      assert:
+        that:
+          - proxmox_user is defined
+          - proxmox_password is defined
+        fail_msg: "Missing encrypted Proxmox credentials"
+        
+    - name: Validate variable types
+      assert:
+        that:
+          - control_plane_count | int == control_plane_count
+          - worker_count | int == worker_count
+          - control_plane_cores | int == control_plane_cores
+          - control_plane_memory | int == control_plane_memory
+          - worker_cores | int == worker_cores
+          - worker_memory | int == worker_memory
+          - nat_gateway_vm_id | int == nat_gateway_vm_id
+        fail_msg: "Invalid variable types"
+        
+    - name: Check for duplicate VM IDs
+      assert:
+        that:
+          - (control_plane_vm_ids + worker_vm_ids + [nat_gateway_vm_id]) | unique | length == (control_plane_vm_ids + worker_vm_ids + [nat_gateway_vm_id]) | length
+        fail_msg: "Duplicate VM IDs found"
+        
+    - name: Check for duplicate IP addresses
+      assert:
+        that:
+          - (control_plane_ips + worker_ips) | unique | length == (control_plane_ips + worker_ips) | length
+        fail_msg: "Duplicate IP addresses found"
+        
+    - name: Validate IP address format
+      assert:
+        that:
+          - item | regex_search('^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$')
+        fail_msg: "Invalid IP address format: {{ item }}"
+      loop: "{{ control_plane_ips + worker_ips }}"
+      
+    - name: Validate CIDR format
+      assert:
+        that:
+          - talos_network_cidr | regex_search('^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}$')
+          - management_network_cidr | regex_search('^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}$')
+        fail_msg: "Invalid CIDR format"
+        
+    - name: Check version formats
+      assert:
+        that:
+          - talos_version | regex_search('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+          - kubernetes_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+          - openwrt_version | regex_search('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+        fail_msg: "Invalid version format"
+        
+    - name: Display configuration summary
+      debug:
+        msg:
+          - "✅ Configuration validation passed!"
+          - "📊 Cluster: {{ cluster_name }}"
+          - "🔧 Environment: {{ environment }}"
+          - "🚀 Talos Version: {{ talos_version }}"
+          - "⚙️ Control Planes: {{ control_plane_count }}"
+          - "🔨 Workers: {{ worker_count }}"
+          - "🌐 NAT Gateway: {{ 'Enabled' if enable_nat_gateway else 'Disabled' }}"
+          - "🔒 Firewall: {{ 'Enabled' if enable_firewall else 'Disabled' }}"
+          - "💾 Storage Pool: {{ proxmox_default_storage_pool }}"
