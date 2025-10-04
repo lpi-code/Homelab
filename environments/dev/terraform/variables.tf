@@ -79,13 +79,13 @@ variable "nat_gateway_vm_id" {
 variable "control_plane_memory" {
   description = "Memory for control plane nodes (MB)"
   type        = number
-  default     = 4096
+  default     = 8192
 }
 
 variable "control_plane_cores" {
   description = "CPU cores for control plane nodes"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "worker_memory" {
@@ -141,7 +141,7 @@ variable "nat_gateway_enabled" {
 variable "talos_version" {
   description = "Talos version"
   type        = string
-  default     = "v1.7.0"
+  default     = "1.9.5"
 }
 
 variable "kubernetes_version" {
@@ -265,62 +265,5 @@ variable "ssh_public_keys" {
 }
 
 
-variable "proxmox_api_url" {
-  description = "Proxmox API URL"
-  type        = string
-  default     = "https://192.168.0.149:8006/"
-}
-
-variable "k8s_version" {
-  description = "Kubernetes version"
-  type        = string
-  default     = "1.28"
-}
-
-variable "k8s_cni" {
-  description = "Kubernetes CNI"
-  type        = string
-  default     = "flannel"
-}
-
-variable "k8s_pod_cidr" {
-  description = "Kubernetes pod CIDR"
-  type        = string
-  default     = "10.244.0.0/16"
-}
-
-variable "k8s_service_cidr" {
-  description = "Kubernetes service CIDR"
-  type        = string
-  default     = "10.96.0.0/12"
-}
-
-variable "tunnel_local_port" {
-  description = "Local port for SSH tunnel"
-  type        = number
-  default     = 5801
-}
-
-variable "control_plane_tunnel_ports" {
-  description = "Local ports for control plane node tunnels"
-  type        = list(number)
-  default     = [5802, 5803, 5804]
-}
-
-variable "worker_tunnel_ports" {
-  description = "Local ports for worker node tunnels"
-  type        = list(number)
-  default     = [5805, 5806, 5807]
-}
-
-variable "openwrt_template_file_id" {
-  description = "OpenWrt template file ID for LXC container"
-  type        = string
-  default     = "local:vztmpl/openwrt-template.tar.gz"
-}
-
-variable "talos_image_file_id" {
-  description = "Talos image file ID"
-  type        = string
-  default     = "storage-isos:import/talos.qcow2"
-}
+# Note: These variables are now passed directly from Ansible
+# No need for separate variable definitions here

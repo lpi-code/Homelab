@@ -24,61 +24,8 @@
     
     openwrt_template_file_id: "local:vztmpl/openwrt-template.tar.gz"
     talos_image_file_id: "{{ proxmox_default_iso_pool }}:import/talos.qcow2"
-    # Terraform variables - define all required variables here instead of using tfvars
-    terraform_variables:
-      # Proxmox configuration
-      proxmox_host: "{{ inventory_hostname }}"
-      proxmox_node: "{{ proxmox_node | default('pve02') }}"
-      proxmox_user: "{{ proxmox_user }}@pve"
-      proxmox_password: "{{ proxmox_password }}"
-      proxmox_tls_insecure: "{{ proxmox_tls_insecure | default(true) }}"
-      
-      # Cluster configuration
-      cluster_name: "{{ cluster_name | default('talos-cluster') }}"
-      environment: "{{ environment | default('dev') }}"
-      
-      # VM configuration
-      control_plane_count: "{{ control_plane_count | default(3) }}"
-      worker_count: "{{ worker_count | default(3) }}"
-      
-      # VM IDs - use different IDs to avoid conflicts with existing VMs
-      control_plane_vm_ids: "{{ control_plane_vm_ids | default('[301, 302, 303]') }}"
-      worker_vm_ids: "{{ worker_vm_ids | default('[401, 402, 403]') }}"
-      nat_gateway_vm_id: "{{ nat_gateway_vm_id | default(300) }}"
-      
-      # VM specifications
-      control_plane_memory: "{{ control_plane_memory | default(4096) }}"
-      control_plane_cores: "{{ control_plane_cores | default(2) }}"
-      worker_memory: "{{ worker_memory | default(8192) }}"
-      worker_cores: "{{ worker_cores | default(4) }}"
-      nat_gateway_memory: "{{ nat_gateway_memory | default(1024) }}"
-      nat_gateway_cores: "{{ nat_gateway_cores | default(1) }}"
-      
-      # Storage configuration
-      vm_disk_size: "{{ vm_disk_size | default('32G') }}"
-      storage_pool: "{{ proxmox_default_storage_pool }}"
-      
-      # Network configuration
-      talos_network_cidr: "{{ talos_network_cidr | default('10.0.0.0/16') }}"
-      nat_gateway_enabled: "{{ enable_nat_gateway | default(false) }}"
-      
-      # Talos configuration
-      talos_version: "{{ talos_version | default('v1.7.0') }}"
-      kubernetes_version: "{{ kubernetes_version | default('v1.29.0') }}"
-      
-      # SSH configuration
-      ssh_public_keys: "{{ ssh_public_keys | default('[]') }}"
-
-      # Tunnel configuration
-      tunnel_local_port: "{{ tunnel_local_port }}"
-      
-      # Node tunnel configuration
-      control_plane_tunnel_ports: "{{ control_plane_tunnel_ports }}"
-      worker_tunnel_ports: "{{ worker_tunnel_ports }}"
-      
-      # Node IP addresses for tunnel setup
-      control_plane_ips: "{{ control_plane_ips }}"
-      worker_ips: "{{ worker_ips }}"
+    # Note: Terraform variables are now passed directly from inventory variables
+    # No need for hardcoded terraform_variables section
   
 
   pre_tasks:
@@ -271,6 +218,73 @@
             project_path: "{{ terraform_dir }}"
             binary_path: "/usr/bin/tofu"
             workspace: "default"
+            variables:
+              # Proxmox Configuration
+              proxmox_host: "{{ inventory_hostname }}"
+              proxmox_node: "{{ proxmox_node | default('pve02') }}"
+              proxmox_user: "{{ proxmox_user }}@pve"
+              proxmox_password: "{{ proxmox_password }}"
+              proxmox_tls_insecure: "{{ proxmox_tls_insecure | default(true) }}"
+              
+              # Cluster Configuration
+              cluster_name: "{{ cluster_name }}"
+              environment: "{{ environment | default('dev') }}"
+              
+              # VM Configuration
+              control_plane_count: "{{ control_plane_count }}"
+              worker_count: "{{ worker_count }}"
+              control_plane_vm_ids: "{{ control_plane_vm_ids }}"
+              worker_vm_ids: "{{ worker_vm_ids }}"
+              nat_gateway_vm_id: "{{ nat_gateway_vm_id }}"
+              
+              # Resource Configuration
+              control_plane_cores: "{{ control_plane_cores }}"
+              control_plane_memory: "{{ control_plane_memory }}"
+              control_plane_disk_size: "{{ control_plane_disk_size }}"
+              worker_cores: "{{ worker_cores }}"
+              worker_memory: "{{ worker_memory }}"
+              worker_disk_size: "{{ worker_disk_size }}"
+              nat_gateway_memory: "{{ nat_gateway_memory | default(1024) }}"
+              nat_gateway_cores: "{{ nat_gateway_cores | default(1) }}"
+              
+              # Storage Configuration
+              storage_pool: "{{ proxmox_default_storage_pool }}"
+              vm_disk_size: "{{ vm_disk_size | default('32G') }}"
+              
+              # Network Configuration
+              bridge_name: "{{ bridge_name }}"
+              talos_network_cidr: "{{ talos_network_cidr }}"
+              talos_network_gateway: "{{ talos_network_gateway }}"
+              management_network_cidr: "{{ management_network_cidr }}"
+              management_gateway: "{{ management_gateway }}"
+              
+              # NAT Gateway Configuration
+              enable_nat_gateway: "{{ enable_nat_gateway }}"
+              nat_gateway_management_ip: "{{ nat_gateway_management_ip }}"
+              nat_gateway_cluster_ip: "{{ nat_gateway_cluster_ip }}"
+              openwrt_version: "{{ openwrt_version }}"
+              iso_pool: "{{ iso_pool | default('storage-isos') }}"
+              
+              # Security Configuration
+              enable_firewall: "{{ enable_firewall }}"
+              ssh_public_keys: "{{ ssh_public_keys }}"
+              
+              # Talos Configuration
+              talos_version: "{{ talos_version }}"
+              kubernetes_version: "{{ kubernetes_version | default('v1.29.0') }}"
+              
+              # Control Plane IPs
+              control_plane_ips: "{{ control_plane_ips }}"
+              worker_ips: "{{ worker_ips }}"
+              
+              # Tunnel Configuration
+              tunnel_local_port: "{{ tunnel_local_port }}"
+              control_plane_tunnel_ports: "{{ control_plane_tunnel_ports }}"
+              worker_tunnel_ports: "{{ worker_tunnel_ports }}"
+              
+              # Template Configuration
+              openwrt_template_file_id: "{{ openwrt_template_file_id }}"
+              talos_image_file_id: "{{ talos_image_file_id }}"
           environment:
             http_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
             https_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
