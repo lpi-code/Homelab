@@ -1,6 +1,11 @@
 ---
-# Production Kubernetes Workers group variables
+# Production Kubernetes Workers Configuration
+# Variables specific to worker nodes
 
-cluster_role: worker
-cluster_name: prod-cluster
-node_type: talos
+# Node Role Configuration
+cluster_role: "worker"
+node_type: "talos"
+
+# Worker Specific Settings
+worker_auto_scaling_enabled: true
+worker_resource_limits_enabled: true

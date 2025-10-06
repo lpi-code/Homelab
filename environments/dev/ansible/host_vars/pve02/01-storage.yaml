@@ -16,6 +16,9 @@ proxmox_default_storage_pool: "storage-vms"
 proxmox_default_iso_path: "/var/lib/vz/template/iso"
 proxmox_iso_pool: "local"
 
+# ISO pool for templates
+iso_pool: "storage-isos"
+
 # ZFS Pools Configuration for Additional Disks
 zfs_pools:
   - name: "storage"

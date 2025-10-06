@@ -94,3 +94,6 @@ vm_disk_size: "20G"
 vm_network: "vmbr0"
 vm_tags: "kubernetes,talos"
 
+
+openwrt_template_file_id: "local:vztmpl/openwrt-template.tar.gz"
+talos_image_file_id: "storage-isos:import/talos.qcow2"
