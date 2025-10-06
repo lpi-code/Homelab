@@ -14,7 +14,7 @@ cluster_name = "homelab"
 environment = "dev"
 
 # Talos Configuration
-talos_version = "1.9.5"
+talos_version = "1.11.1"
 template_vm_id = 100
 create_template = true
 
@@ -58,4 +58,3 @@ iso_pool = "storage-isos"
 enable_firewall = true
 
 # SSH Keys (optional)
-ssh_public_keys = []
