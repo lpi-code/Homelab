@@ -2,7 +2,7 @@
 # This file can be overridden with a variables file or environment variables
 
 # Talos version to build
-talos_version = "1.9.5"
+talos_version = "1.11.1"
 
 # Proxmox connection settings
 proxmox_node = "pve02"

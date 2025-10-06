@@ -30,38 +30,22 @@ resource "proxmox_virtual_environment_container" "openwrt_router" {
     size    = var.router_disk_size
   }
 
-  # Network configuration - Management network (WAN)
+  # Network configuration - Cluster network (LAN)
   network_interface {
     name   = "eth0"
+    bridge = var.cluster_bridge
+  }
+  # Network configuration - Management network (WAN)
+  network_interface {
+    name   = "eth1"
     bridge = var.management_bridge
   }
 
-  # Network configuration - Cluster network (LAN)
-  network_interface {
-    name   = "eth1"
-    bridge = var.cluster_bridge
-  }
 
 
   # Container features
   features {
     nesting = true # This is required for OpenWrt to run in a container
-  }
-
-  # Initialization
-  initialization {
-    ip_config {
-      ipv4 {
-        address = var.management_ip
-        gateway = var.management_gateway
-      }
-    }
-    ip_config {
-      ipv4 {
-        address = var.cluster_ip
-        gateway = var.management_gateway
-      }
-    }
   }
 
   operating_system {

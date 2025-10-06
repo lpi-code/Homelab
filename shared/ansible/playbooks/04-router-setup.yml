@@ -1,0 +1,75 @@
+---
+# Setup OpenWrt router
+- name: Setup OpenWrt router
+  hosts: openwrt_routers
+  become: true
+  gather_facts: false
+  tasks:
+    
+    - name: Get local SSH public key
+      ansible.builtin.set_fact:
+        ssh_public_key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+      delegate_to: localhost
+      become: no
+
+    - name: Enable SSH
+      ansible.builtin.shell:
+        # Executing on the proxmox
+        lxc-attach -n {{ nat_gateway_vm_id }} -- ash -c "
+          uci set dropbear.@dropbear[0].Interface='wan' &&
+          uci set network.wan.ipaddr='{{ ansible_host }}' &&
+          uci commit dropbear &&
+          /etc/init.d/dropbear restart &&
+          grep -qxF '{{ ssh_public_key }}' /etc/dropbear/authorized_keys || echo '{{ ssh_public_key }}' >> /etc/dropbear/authorized_keys &&
+          uci set firewall.@rule[0].name='Allow-SSH from management network' &&
+          uci set firewall.@rule[0].target='ACCEPT' &&
+          uci set firewall.@rule[0].src='wan' &&
+          uci set firewall.@rule[0].proto='tcp' &&
+          uci set firewall.@rule[0].dest_port='22' &&
+          uci commit firewall &&
+          /etc/init.d/firewall restart"
+      delegate_to: "{{ proxmox_node }}"
+    
+    - name: Install python3
+      ansible.builtin.shell:
+        # Executing on the proxmox
+        lxc-attach -n {{ nat_gateway_vm_id }} -- ash -c "
+          host google.com > /dev/null 2>&1 || echo nameserver 1.1.1.1 > /etc/resolv.conf &&
+          opkg update &&
+          opkg install python3
+        "
+      delegate_to: "{{ proxmox_node }}"
+    
+    - name: Get DHCP lease for the management ip
+      ansible.builtin.shell:
+        # Executing on the proxmox
+        lxc-attach -n {{ nat_gateway_vm_id }} -- ash -c "
+          ip -4 -o addr show dev eth1 | awk '{print \$4}' | cut -d '/' -f 1
+        "
+      register: temp_management_ip_raw
+      delegate_to: "{{ proxmox_node }}"
+      changed_when: false
+    
+    - name: Wait for SSH to be available
+      ansible.builtin.wait_for:
+        host: "{{ temp_management_ip_raw.stdout }}"
+        port: 22
+        state: started
+        timeout: 300
+      delegate_to: "{{ proxmox_node }}"
+    
+    - name: Template OpenWRT configuration
+      ansible.builtin.template:
+        src: "{{ lookup('env', 'SHARED_DIR_PATH') }}/ansible/templates/openwrt_network.j2"
+        dest: "/etc/config/network"
+        mode: "0644"
+      vars:
+        ansible_host: "{{ temp_management_ip_raw.stdout }}"
+    
+    - name: Restart OpenWRT
+      ansible.builtin.shell:
+        # Executing on the proxmox
+        lxc-attach -n {{ nat_gateway_vm_id }} -- ash -c "
+          /etc/init.d/network restart
+        "
+      delegate_to: "{{ proxmox_node }}"

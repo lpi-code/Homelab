@@ -22,8 +22,8 @@ resource "proxmox_virtual_environment_vm" "talos_vm" {
   node_name = var.proxmox_node
   vm_id     = var.vm_id
   
-  # 📝 VM Description with Emoji Info
-  description = var.node_type == "controlplane" ? "🎛️ Control Plane Node for ${var.cluster_name} | 🎯 Kubernetes API Server | 📊 etcd | 🔧 IP: ${var.static_ip} | 🚀 Talos Linux" : "⚙️ Worker Node for ${var.cluster_name} | 🏗️ Workload Execution | 📦 Pod Runtime | 🔧 IP: ${var.static_ip} | 🚀 Talos Linux"
+  # VM Description with emoji
+  description = var.node_type == "controlplane" ? "🛡️ Control Plane Node for ${var.cluster_name}\n🚀 Kubernetes API Server\n🗄️ etcd\n🌐 IP: ${var.static_ip}\n🐧 Talos Linux" : "⚙️ Worker Node for ${var.cluster_name}\n📦 Workload Execution\n🐳 Pod Runtime\n🌐 IP: ${var.static_ip}\n🐧 Talos Linux"
 
   # CPU configuration
   cpu {
@@ -117,6 +117,11 @@ resource "talos_machine_configuration_apply" "config" {
   depends_on = [
     proxmox_virtual_environment_vm.talos_vm,
   ]
+  timeouts = {
+    create = "3m"
+    delete = "3m"
+    update = "3m"
+  }
 }
 
 

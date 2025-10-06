@@ -1,0 +1,277 @@
+---
+# Configuration Validation Playbook
+# Validates infrastructure configuration consistency across environments
+
+- name: Validate Infrastructure Configuration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    environments: ["dev", "prod"]
+    required_vars:
+      - cluster_name
+      - talos_version
+      - control_plane_count
+      - worker_count
+      - control_plane_vm_ids
+      - control_plane_ips
+      - worker_vm_ids
+      - worker_ips
+      - bridge_name
+      - talos_network_cidr
+      - talos_network_gateway
+      - management_network_cidr
+      - management_gateway
+      - enable_nat_gateway
+      - enable_firewall
+      - ssh_public_keys
+
+  tasks:
+    - name: Load environment configurations
+      include_vars: "{{ item }}"
+      loop:
+        - "environments/dev/ansible/group_vars/dev_talos/main.yaml"
+        - "environments/prod/ansible/group_vars/prod_talos/main.yaml"
+      when: item is file
+
+    - name: Validate required variables are defined
+      assert:
+        that:
+          - item is defined
+          - item != ""
+        fail_msg: "Required variable '{{ item }}' is not defined or empty"
+        success_msg: "Variable '{{ item }}' is properly defined"
+      loop: "{{ required_vars }}"
+
+    - name: Validate cluster name format
+      assert:
+        that:
+          - cluster_name is defined
+          - cluster_name | length > 0
+          - cluster_name | regex('^[a-zA-Z0-9-]+$')
+        fail_msg: "Cluster name must be alphanumeric with hyphens only"
+        success_msg: "Cluster name format is valid"
+
+    - name: Validate Talos version format
+      assert:
+        that:
+          - talos_version is defined
+          - talos_version | regex('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+        fail_msg: "Talos version must be in format X.Y.Z (e.g., 1.11.1)"
+        success_msg: "Talos version format is valid"
+
+    - name: Validate control plane count
+      assert:
+        that:
+          - control_plane_count is defined
+          - control_plane_count | int >= 1
+          - control_plane_count | int <= 5
+        fail_msg: "Control plane count must be between 1 and 5"
+        success_msg: "Control plane count is valid"
+
+    - name: Validate worker count
+      assert:
+        that:
+          - worker_count is defined
+          - worker_count | int >= 0
+        fail_msg: "Worker count must be 0 or greater"
+        success_msg: "Worker count is valid"
+
+    - name: Validate VM IDs are unique
+      assert:
+        that:
+          - control_plane_vm_ids is defined
+          - worker_vm_ids is defined
+          - (control_plane_vm_ids + worker_vm_ids) | unique | length == (control_plane_vm_ids | length + worker_vm_ids | length)
+        fail_msg: "VM IDs must be unique across all nodes"
+        success_msg: "VM IDs are unique"
+
+    - name: Validate VM ID ranges
+      assert:
+        that:
+          - item | int > 0
+          - item | int < 10000
+        fail_msg: "VM ID {{ item }} must be between 1 and 9999"
+        success_msg: "VM ID {{ item }} is valid"
+      loop: "{{ control_plane_vm_ids + worker_vm_ids }}"
+
+    - name: Validate IP addresses format
+      assert:
+        that:
+          - item | ipaddr
+        fail_msg: "IP address '{{ item }}' is not valid"
+        success_msg: "IP address '{{ item }}' is valid"
+      loop: "{{ control_plane_ips + worker_ips }}"
+
+    - name: Validate IP addresses are unique
+      assert:
+        that:
+          - (control_plane_ips + worker_ips) | unique | length == (control_plane_ips | length + worker_ips | length)
+        fail_msg: "IP addresses must be unique across all nodes"
+        success_msg: "IP addresses are unique"
+
+    - name: Validate bridge name format
+      assert:
+        that:
+          - bridge_name is defined
+          - bridge_name | regex('^vmbr[0-9]+$')
+        fail_msg: "Bridge name must be in format vmbrX (e.g., vmbr1)"
+        success_msg: "Bridge name format is valid"
+
+    - name: Validate network CIDR format
+      assert:
+        that:
+          - talos_network_cidr is defined
+          - talos_network_cidr | ipaddr('network')
+        fail_msg: "Talos network CIDR '{{ talos_network_cidr }}' is not valid"
+        success_msg: "Talos network CIDR is valid"
+
+    - name: Validate gateway IP format
+      assert:
+        that:
+          - talos_network_gateway is defined
+          - talos_network_gateway | ipaddr
+        fail_msg: "Talos network gateway '{{ talos_network_gateway }}' is not valid"
+        success_msg: "Talos network gateway is valid"
+
+    - name: Validate management network CIDR format
+      assert:
+        that:
+          - management_network_cidr is defined
+          - management_network_cidr | ipaddr('network')
+        fail_msg: "Management network CIDR '{{ management_network_cidr }}' is not valid"
+        success_msg: "Management network CIDR is valid"
+
+    - name: Validate management gateway IP format
+      assert:
+        that:
+          - management_gateway is defined
+          - management_gateway | ipaddr
+        fail_msg: "Management gateway '{{ management_gateway }}' is not valid"
+        success_msg: "Management gateway is valid"
+
+    - name: Validate boolean flags
+      assert:
+        that:
+          - enable_nat_gateway is defined
+          - enable_nat_gateway is boolean
+          - enable_firewall is defined
+          - enable_firewall is boolean
+        fail_msg: "Boolean flags must be properly defined"
+        success_msg: "Boolean flags are valid"
+
+    - name: Validate SSH public keys format
+      assert:
+        that:
+          - ssh_public_keys is defined
+          - ssh_public_keys is list
+          - item | regex('^ssh-')
+        fail_msg: "SSH public key '{{ item }}' must start with 'ssh-'"
+        success_msg: "SSH public key '{{ item }}' format is valid"
+      loop: "{{ ssh_public_keys }}"
+      when: ssh_public_keys is defined and ssh_public_keys | length > 0
+
+    - name: Validate resource specifications
+      block:
+        - name: Validate control plane cores
+          assert:
+            that:
+              - control_plane_cores is defined
+              - control_plane_cores | int >= 1
+              - control_plane_cores | int <= 32
+            fail_msg: "Control plane cores must be between 1 and 32"
+            success_msg: "Control plane cores are valid"
+
+        - name: Validate control plane memory
+          assert:
+            that:
+              - control_plane_memory is defined
+              - control_plane_memory | int >= 1024
+              - control_plane_memory | int <= 131072
+            fail_msg: "Control plane memory must be between 1GB and 128GB"
+            success_msg: "Control plane memory is valid"
+
+        - name: Validate control plane disk size
+          assert:
+            that:
+              - control_plane_disk_size is defined
+              - control_plane_disk_size | regex('^[0-9]+[GMK]?$')
+            fail_msg: "Control plane disk size must be in format like '50G'"
+            success_msg: "Control plane disk size format is valid"
+
+        - name: Validate worker cores
+          assert:
+            that:
+              - worker_cores is defined
+              - worker_cores | int >= 1
+              - worker_cores | int <= 32
+            fail_msg: "Worker cores must be between 1 and 32"
+            success_msg: "Worker cores are valid"
+
+        - name: Validate worker memory
+          assert:
+            that:
+              - worker_memory is defined
+              - worker_memory | int >= 1024
+              - worker_memory | int <= 131072
+            fail_msg: "Worker memory must be between 1GB and 128GB"
+            success_msg: "Worker memory is valid"
+
+        - name: Validate worker disk size
+          assert:
+            that:
+              - worker_disk_size is defined
+              - worker_disk_size | regex('^[0-9]+[GMK]?$')
+            fail_msg: "Worker disk size must be in format like '100G'"
+            success_msg: "Worker disk size format is valid"
+
+    - name: Validate NAT gateway configuration
+      block:
+        - name: Validate NAT gateway VM ID
+          assert:
+            that:
+              - nat_gateway_vm_id is defined
+              - nat_gateway_vm_id | int > 0
+              - nat_gateway_vm_id | int < 10000
+            fail_msg: "NAT gateway VM ID must be between 1 and 9999"
+            success_msg: "NAT gateway VM ID is valid"
+
+        - name: Validate NAT gateway management IP
+          assert:
+            that:
+              - nat_gateway_management_ip is defined
+              - nat_gateway_management_ip | ipaddr
+            fail_msg: "NAT gateway management IP is not valid"
+            success_msg: "NAT gateway management IP is valid"
+
+        - name: Validate NAT gateway cluster IP
+          assert:
+            that:
+              - nat_gateway_cluster_ip is defined
+              - nat_gateway_cluster_ip | ipaddr
+            fail_msg: "NAT gateway cluster IP is not valid"
+            success_msg: "NAT gateway cluster IP is valid"
+
+        - name: Validate OpenWrt version
+          assert:
+            that:
+              - openwrt_version is defined
+              - openwrt_version | regex('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+            fail_msg: "OpenWrt version must be in format X.Y.Z"
+            success_msg: "OpenWrt version format is valid"
+      when: enable_nat_gateway | default(false)
+
+    - name: Configuration validation summary
+      debug:
+        msg: |
+          ✅ Configuration validation completed successfully!
+          
+          Cluster: {{ cluster_name }}
+          Talos Version: {{ talos_version }}
+          Control Plane Nodes: {{ control_plane_count }}
+          Worker Nodes: {{ worker_count }}
+          Bridge: {{ bridge_name }}
+          Network: {{ talos_network_cidr }}
+          NAT Gateway: {{ enable_nat_gateway | ternary('Enabled', 'Disabled') }}
+          Firewall: {{ enable_firewall | ternary('Enabled', 'Disabled') }}
+          
+          All variables are properly configured and validated.

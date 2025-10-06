@@ -1,6 +1,6 @@
 ---
 - name: Deploy Talos Kubernetes Cluster with Terraform
-  hosts: dev_talos
+  hosts: pve
   become: yes
   gather_facts: no
   collections:
@@ -24,61 +24,6 @@
     
     openwrt_template_file_id: "local:vztmpl/openwrt-template.tar.gz"
     talos_image_file_id: "{{ proxmox_default_iso_pool }}:import/talos.qcow2"
-    # Terraform variables - define all required variables here instead of using tfvars
-    terraform_variables:
-      # Proxmox configuration
-      proxmox_host: "{{ inventory_hostname }}"
-      proxmox_node: "{{ proxmox_node | default('pve02') }}"
-      proxmox_user: "{{ proxmox_user }}@pve"
-      proxmox_password: "{{ proxmox_password }}"
-      proxmox_tls_insecure: "{{ proxmox_tls_insecure | default(true) }}"
-      
-      # Cluster configuration
-      cluster_name: "{{ cluster_name | default('talos-cluster') }}"
-      environment: "{{ environment | default('dev') }}"
-      
-      # VM configuration
-      control_plane_count: "{{ control_plane_count | default(3) }}"
-      worker_count: "{{ worker_count | default(3) }}"
-      
-      # VM IDs - use different IDs to avoid conflicts with existing VMs
-      control_plane_vm_ids: "{{ control_plane_vm_ids | default('[301, 302, 303]') }}"
-      worker_vm_ids: "{{ worker_vm_ids | default('[401, 402, 403]') }}"
-      nat_gateway_vm_id: "{{ nat_gateway_vm_id | default(300) }}"
-      
-      # VM specifications
-      control_plane_memory: "{{ control_plane_memory | default(4096) }}"
-      control_plane_cores: "{{ control_plane_cores | default(2) }}"
-      worker_memory: "{{ worker_memory | default(8192) }}"
-      worker_cores: "{{ worker_cores | default(4) }}"
-      nat_gateway_memory: "{{ nat_gateway_memory | default(1024) }}"
-      nat_gateway_cores: "{{ nat_gateway_cores | default(1) }}"
-      
-      # Storage configuration
-      vm_disk_size: "{{ vm_disk_size | default('32G') }}"
-      storage_pool: "{{ proxmox_default_storage_pool }}"
-      
-      # Network configuration
-      talos_network_cidr: "{{ talos_network_cidr | default('10.0.0.0/16') }}"
-      nat_gateway_enabled: "{{ enable_nat_gateway | default(false) }}"
-      
-      # Talos configuration
-      talos_version: "{{ talos_version | default('v1.7.0') }}"
-      kubernetes_version: "{{ kubernetes_version | default('v1.29.0') }}"
-      
-      # SSH configuration
-      ssh_public_keys: "{{ ssh_public_keys | default('[]') }}"
-
-      # Tunnel configuration
-      tunnel_local_port: "{{ tunnel_local_port }}"
-      
-      # Node tunnel configuration
-      control_plane_tunnel_ports: "{{ control_plane_tunnel_ports }}"
-      worker_tunnel_ports: "{{ worker_tunnel_ports }}"
-      
-      # Node IP addresses for tunnel setup
-      control_plane_ips: "{{ control_plane_ips }}"
-      worker_ips: "{{ worker_ips }}"
   
 
   pre_tasks:
@@ -246,31 +191,90 @@
         msg: "{{ openwrt_template_file_id }}"
       delegate_to: localhost
       become: no
-    # Generate terraform.tfvars file
-    - name: Generate terraform.tfvars file
-      ansible.builtin.template:
-        src: terraform.tfvars.j2
-        dest: "{{ terraform_dir }}/terraform.tfvars"
-        mode: '0600'
-      delegate_to: localhost
-      become: no
     # Terraform execution tasks using community.general.terraform module with OpenTofu
     - name: Apply the Talos Cluster Terraform configuration
       block:
-        - name: Initialize Terraform with OpenTofu
-          ansible.builtin.command:
-            cmd: "tofu init -reconfigure -upgrade"
-            chdir: "{{ terraform_dir }}"
-          register: terraform_init_result
-          delegate_to: localhost
-          become: no
-                  
+        # - name: Initialize Terraform with OpenTofu
+        #   ansible.builtin.command:
+        #     cmd: "tofu init -reconfigure -upgrade"
+        #     chdir: "{{ terraform_dir }}"
+        #   register: terraform_init_result
+        #   delegate_to: localhost
+        #   become: no
+        
+        # - name: Debug Terraform init result
+        #   debug:
+        #     msg: "{{ terraform_init_result }}"
+        #   delegate_to: localhost
+        #   become: no
 
-        - name: Apply Terraform configuration
+        # - name: Check Terraform state before plan
+        #   ansible.builtin.command:
+        #     cmd: "tofu state list"
+        #     chdir: "{{ terraform_dir }}"
+        #   register: terraform_state_before
+        #   environment:
+        #     # Proxmox provider configuration
+        #     PROXMOX_VE_ENDPOINT: "https://{{ inventory_hostname }}:8006/"
+        #     PROXMOX_VE_USERNAME: "{{ proxmox_user }}@pve"
+        #     PROXMOX_VE_PASSWORD: "{{ proxmox_password }}"
+        #     PROXMOX_VE_INSECURE: "true"
+        #   delegate_to: localhost
+        #   become: no
+        #   ignore_errors: true
+        #   failed_when: false
+
+        # - name: Display current Terraform state
+        #   debug:
+        #     msg: 
+        #       - "📋 Current Terraform state contains {{ terraform_state_before.stdout_lines | length if terraform_state_before.stdout_lines is defined else 0 }} resources:"
+        #       - "{{ terraform_state_before.stdout_lines if terraform_state_before.stdout_lines is defined else ['State file not found or empty'] }}"
+        #       - "{% if terraform_state_before.failed %}⚠️ State check failed: {{ terraform_state_before.msg }}{% endif %}"
+        #   delegate_to: localhost
+        #   become: no
+
+        # - name: Run Terraform plan to check for changes
+        #   community.general.terraform:
+        #     project_path: "{{ terraform_dir }}"
+        #     binary_path: "/usr/bin/tofu"
+        #     workspace: "default"
+        #     overwrite_init: false
+        #     state: "present"
+            
+        #   environment:
+        #     http_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+        #     https_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+        #     HTTP_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+        #     HTTPS_PROXY: "socks5://127.0.0.1:{{ tunnel_local_port }}"
+        #     no_proxy: "localhost,127.0.0.1,registry.opentofu.org"
+        #     NO_PROXY: "localhost,127.0.0.1,registry.opentofu.org"
+        #     # Proxmox provider configuration
+        #     PROXMOX_VE_ENDPOINT: "https://{{ inventory_hostname }}:8006/"
+        #     PROXMOX_VE_USERNAME: "{{ proxmox_user }}@pve"
+        #     PROXMOX_VE_PASSWORD: "{{ proxmox_password }}"
+        #     PROXMOX_VE_INSECURE: "true"
+        #   register: terraform_plan_result
+        #   delegate_to: localhost
+        #   become: no
+
+        # - name: Check if plan shows changes
+        #   debug:
+        #     msg: 
+        #       - "🔍 Terraform plan completed"
+        #       - "📊 Plan shows changes: {{ terraform_plan_result.changed | default(false) }}"
+        #       - "📝 Resources to add: {{ terraform_plan_result.add | default(0) }}"
+        #       - "📝 Resources to change: {{ terraform_plan_result.change | default(0) }}"
+        #       - "📝 Resources to destroy: {{ terraform_plan_result.destroy | default(0) }}"
+        #   delegate_to: localhost
+        #   become: no
+
+        - name: Apply Terraform configuration (only if changes needed)
           community.general.terraform:
             project_path: "{{ terraform_dir }}"
             binary_path: "/usr/bin/tofu"
             workspace: "default"
+            overwrite_init: false
+            state: "present"
           environment:
             http_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
             https_proxy: "socks5://127.0.0.1:{{ tunnel_local_port }}"
@@ -287,12 +291,20 @@
           delegate_to: localhost
           become: no
 
+        - name: Skip apply if no changes needed
+          debug:
+            msg: "✅ No changes needed - infrastructure is already up to date!"
+          delegate_to: localhost
+          become: no
+          when: not (terraform_plan_result.changed | default(false))
+
         - name: Display Terraform outputs
           debug:
             msg: "{{ terraform_apply_result.outputs }}"
           delegate_to: localhost
           become: no
           when: terraform_apply_result.outputs is defined
+
 
       always:
         - name: Find PID of SOCKS tunnel process
@@ -356,10 +368,10 @@
         msg:
           - "🚀 Talos cluster deployment completed!"
           - "📊 Cluster Name: {{ cluster_name }}"
-          - "🌐 API Endpoint: {{ terraform_apply_result.outputs.cluster_endpoint.value if terraform_apply_result.outputs is defined else 'N/A' }}"
-          - "🔧 NAT Gateway IP: {{ terraform_apply_result.outputs.nat_gateway_management_ip.value if terraform_apply_result.outputs is defined else 'N/A' }}"
-          - "📋 Cluster Network: {{ terraform_apply_result.outputs.talos_network_cidr.value if terraform_apply_result.outputs is defined else 'N/A' }}"
-          - "✅ Ready: {{ terraform_apply_result.outputs.cluster_ready.value if terraform_apply_result.outputs is defined else 'N/A' }}"
+          - "🌐 API Endpoint: {{ terraform_apply_result.outputs.cluster_info.value.cluster_endpoint if terraform_apply_result.outputs is defined and terraform_apply_result.outputs.cluster_info is defined else 'N/A' }}"
+          - "🔧 NAT Gateway IP: {{ terraform_apply_result.outputs.cluster_info.value.nat_gateway.management_ip if terraform_apply_result.outputs is defined and terraform_apply_result.outputs.cluster_info is defined and terraform_apply_result.outputs.cluster_info.value.nat_gateway is defined else 'N/A' }}"
+          - "📋 Cluster Network: {{ terraform_apply_result.outputs.cluster_info.value.network_info.talos_network_cidr if terraform_apply_result.outputs is defined and terraform_apply_result.outputs.cluster_info is defined else 'N/A' }}"
+          - "✅ Ready: {{ terraform_apply_result.outputs.deployment_status.value.cluster_ready if terraform_apply_result.outputs is defined and terraform_apply_result.outputs.deployment_status is defined else 'N/A' }}"
       when: terraform_apply_result.outputs is defined
 
     - name: Display tunnel access information

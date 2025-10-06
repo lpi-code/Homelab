@@ -116,7 +116,6 @@ module "talos_network" {
 | openwrt_version | OpenWrt version to install | `string` | `"23.05.5"` | no |
 | iso_pool | Storage pool for ISO images | `string` | `"storage-isos"` | no |
 | talos_control_plane_ips | List of control plane IP addresses for load balancing | `list(string)` | `[]` | no |
-| ssh_public_keys | List of SSH public keys for access | `list(string)` | `[]` | no |
 | enable_firewall | Enable firewall rules for Talos cluster network | `bool` | `true` | no |
 
 ## Outputs

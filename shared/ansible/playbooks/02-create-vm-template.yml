@@ -27,7 +27,7 @@
     vm_network_bridge_default: "vmbr0"
     
     # Version configuration (defaults)
-    talos_version_default: "1.8.0"
+    talos_version_default: "1.11.1"
     openwrt_version_default: "23.05.3"
 
   pre_tasks:

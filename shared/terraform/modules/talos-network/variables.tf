@@ -115,12 +115,6 @@ variable "talos_control_plane_ips" {
   default     = []
 }
 
-variable "ssh_public_keys" {
-  description = "List of SSH public keys for load balancer access"
-  type        = list(string)
-  default     = []
-}
-
 # Firewall Configuration
 variable "enable_firewall" {
   description = "Enable firewall rules for Talos cluster network"

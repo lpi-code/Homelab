@@ -60,16 +60,4 @@ output "vm_info" {
   }
 }
 
-# 🚇 Tunnel Information
-output "tunnel_info" {
-  description = "🚇 SSH tunnel information for accessing this node"
-  value = var.tunnel_local_port != null ? {
-    local_port = var.tunnel_local_port
-    remote_ip = var.use_static_ip ? var.static_ip : proxmox_virtual_environment_vm.talos_vm.ipv4_addresses[0][0]
-    remote_port = 22
-    ssh_command = "ssh -L ${var.tunnel_local_port}:${var.use_static_ip ? var.static_ip : proxmox_virtual_environment_vm.talos_vm.ipv4_addresses[0][0]}:22 root@localhost"
-    access_url = "localhost:${var.tunnel_local_port}"
-  } : null
-}
-
 

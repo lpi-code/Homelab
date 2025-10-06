@@ -43,7 +43,7 @@ Set the following environment variables:
 export PKR_VAR_proxmox_token="your-proxmox-api-token"
 export PKR_VAR_proxmox_node="pve02"
 export PKR_VAR_proxmox_storage_pool="local-zfs"
-export PKR_VAR_talos_version="1.9.5"
+export PKR_VAR_talos_version="1.11.1"
 ```
 
 ### Variables File
@@ -54,7 +54,7 @@ Create a `variables.auto.pkr.hcl` file:
 proxmox_token = "your-proxmox-api-token"
 proxmox_node = "pve02"
 proxmox_storage_pool = "local-zfs"
-talos_version = "1.9.5"
+talos_version = "1.11.1"
 template_name = "talos-linux"
 ```
 
@@ -73,7 +73,7 @@ packer validate .
 packer build .
 
 # Build with specific variables
-packer build -var="talos_version=1.9.5" -var="proxmox_node=pve02" .
+packer build -var="talos_version=1.11.1" -var="proxmox_node=pve02" .
 ```
 
 ### Build with Variables File
@@ -86,7 +86,7 @@ packer build -var-file="variables.auto.pkr.hcl" .
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `talos_version` | Talos Linux version to build | `1.9.5` | No |
+| `talos_version` | Talos Linux version to build | `1.11.1` | No |
 | `proxmox_node` | Proxmox node to build on | `pve02` | No |
 | `proxmox_storage_pool` | Storage pool for template | `local-zfs` | No |
 | `proxmox_iso_pool` | Storage pool for ISOs | `storage-isos` | No |

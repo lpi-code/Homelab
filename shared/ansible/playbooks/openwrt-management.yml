@@ -1,0 +1,159 @@
+---
+# OpenWrt Router Management Playbook
+# Comprehensive management of OpenWrt routers with template-based configuration
+
+- name: OpenWrt Router Management
+  hosts: openwrt_routers
+  become: true
+  gather_facts: false
+  vars:
+    # Configuration file paths
+    network_config_path: "/etc/config/network"
+    firewall_config_path: "/etc/config/firewall"
+    system_config_path: "/etc/config/system"
+    dhcp_config_path: "/etc/config/dhcp"
+    
+  tasks:
+    - name: Gather basic facts
+      ansible.builtin.set_fact:
+        router_hostname: "{{ ansible_hostname | default(inventory_hostname) }}"
+        router_management_ip: "{{ ansible_host }}"
+
+    - name: Get local SSH public key
+      ansible.builtin.set_fact:
+        ssh_public_key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+      delegate_to: localhost
+      become: no
+
+    - name: Wait for SSH to be available
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ ssh_port | default(22) }}"
+        state: started
+        timeout: 300
+
+    - name: Backup existing configuration
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/tmp/backup-{{ ansible_date_time.epoch }}-{{ item | basename }}"
+        remote_src: true
+        mode: "0644"
+      loop:
+        - "{{ network_config_path }}"
+        - "{{ firewall_config_path }}"
+        - "{{ system_config_path }}"
+        - "{{ dhcp_config_path }}"
+      when: backup_enabled | default(true)
+
+    - name: Configure system settings
+      ansible.builtin.template:
+        src: "openwrt-system.j2"
+        dest: "{{ system_config_path }}"
+        mode: "0644"
+        backup: true
+
+    - name: Configure network interfaces
+      ansible.builtin.template:
+        src: "openwrt-network.j2"
+        dest: "{{ network_config_path }}"
+        mode: "0644"
+        backup: true
+
+    - name: Configure firewall rules
+      ansible.builtin.template:
+        src: "openwrt-firewall.j2"
+        dest: "{{ firewall_config_path }}"
+        mode: "0644"
+        backup: true
+
+    - name: Configure DHCP settings
+      ansible.builtin.template:
+        src: "openwrt-dhcp.j2"
+        dest: "{{ dhcp_config_path }}"
+        mode: "0644"
+        backup: true
+
+    - name: Install required packages
+      ansible.builtin.shell:
+        cmd: "opkg update && opkg install {{ packages_to_install | default([]) | join(' ') }}"
+      when: packages_to_install is defined and packages_to_install | length > 0
+
+    - name: Configure SSH access
+      ansible.builtin.shell:
+        cmd: |
+          # Configure SSH settings
+          uci set dropbear.@dropbear[0].Port={{ ssh_port | default(22) }}
+          uci set dropbear.@dropbear[0].Interface='lan'
+          uci set dropbear.@dropbear[0].RootLogin={{ '1' if ssh_root_login | default(true) else '0' }}
+          
+          # Add SSH public key
+          mkdir -p /etc/dropbear
+          grep -qxF '{{ ssh_public_key }}' /etc/dropbear/authorized_keys || echo '{{ ssh_public_key }}' >> /etc/dropbear/authorized_keys
+          
+          # Commit and restart
+          uci commit dropbear
+          /etc/init.d/dropbear restart
+
+    - name: Apply UCI configurations
+      ansible.builtin.shell:
+        cmd: |
+          {% for config_type, configs in uci_configs.items() %}
+          {% for config in configs %}
+          uci set {{ config.path }}={{ config.values | to_nice_json }}
+          {% endfor %}
+          {% endfor %}
+          uci commit
+      when: uci_configs is defined
+
+    - name: Enable and start services
+      ansible.builtin.shell:
+        cmd: "/etc/init.d/{{ item }} enable && /etc/init.d/{{ item }} start"
+      loop: "{{ services_to_enable | default([]) }}"
+      when: services_to_enable is defined
+
+    - name: Restart network services
+      ansible.builtin.shell:
+        cmd: |
+          /etc/init.d/network reload
+          /etc/init.d/firewall reload
+          /etc/init.d/dnsmasq reload
+
+    - name: Verify network connectivity
+      ansible.builtin.shell:
+        cmd: |
+          # Test WAN connectivity
+          ping -c 3 {{ management_gateway | default('192.168.0.1') }} || exit 1
+          # Test DNS resolution
+          nslookup google.com || exit 1
+      register: connectivity_test
+      failed_when: connectivity_test.rc != 0
+
+    - name: Display router status
+      ansible.builtin.debug:
+        msg: |
+          Router Configuration Complete:
+          - Hostname: {{ router_hostname }}
+          - Management IP: {{ router_management_ip }}
+          - Cluster IP: {{ cluster_ip | default('Not configured') }}
+          - SSH Port: {{ ssh_port | default(22) }}
+          - Web UI: http://{{ router_management_ip }} (if LuCI installed)
+
+    - name: Clean up old backups
+      ansible.builtin.shell:
+        cmd: |
+          find /tmp -name "backup-*-*" -type f -mtime +{{ backup_retention_days | default(30) }} -delete
+      when: backup_enabled | default(true)
+
+  handlers:
+    - name: restart network
+      ansible.builtin.shell:
+        cmd: "/etc/init.d/network restart"
+
+    - name: restart firewall
+      ansible.builtin.shell:
+        cmd: "/etc/init.d/firewall restart"
+
+    - name: restart dhcp
+      ansible.builtin.shell:
+        cmd: "/etc/init.d/dnsmasq restart"
+

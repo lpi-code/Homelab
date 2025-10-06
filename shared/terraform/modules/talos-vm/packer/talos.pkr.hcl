@@ -10,7 +10,7 @@ packer {
 variable "talos_version" {
   type        = string
   description = "Talos Linux version to build"
-  default     = "1.9.5"
+  default     = "1.11.1"
 }
 
 variable "proxmox_node" {
@@ -140,12 +140,6 @@ source "proxmox-iso" "talos" {
   template_name        = local.template_name_with_version
   template_description = "${var.template_description} - Version ${var.talos_version}"
   template_cloud_init = false
-
-  # SSH settings (not used for Talos, but required by Packer)
-  ssh_username = "root"
-  ssh_password = "talos"
-  ssh_timeout  = "20m"
-
   # Additional settings
   qemu_agent = true
   unmount_iso = true

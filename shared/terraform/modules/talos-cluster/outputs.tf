@@ -123,14 +123,24 @@ output "cluster_ready" {
 output "control_plane_tunnel_info" {
   description = "Tunnel information for control plane nodes"
   value = {
-    for i, vm in module.control_plane : vm.vm_name => vm.tunnel_info
+    for i, vm in module.control_plane : vm.vm_name => {
+      node_name = vm.vm_name
+      node_ip   = vm.vm_ipv4_address
+      tunnel_port = var.control_plane_tunnel_ports[i]
+      node_type = "controlplane"
+    }
   }
 }
 
 output "worker_tunnel_info" {
   description = "Tunnel information for worker nodes"
   value = {
-    for i, vm in module.workers : vm.vm_name => vm.tunnel_info
+    for i, vm in module.workers : vm.vm_name => {
+      node_name = vm.vm_name
+      node_ip   = vm.vm_ipv4_address
+      tunnel_port = var.worker_tunnel_ports[i]
+      node_type = "worker"
+    }
   }
 }
 
@@ -138,10 +148,20 @@ output "all_tunnel_info" {
   description = "All tunnel information for cluster nodes"
   value = merge(
     {
-      for i, vm in module.control_plane : vm.vm_name => vm.tunnel_info
+      for i, vm in module.control_plane : vm.vm_name => {
+        node_name = vm.vm_name
+        node_ip   = vm.vm_ipv4_address
+        tunnel_port = var.control_plane_tunnel_ports[i]
+        node_type = "controlplane"
+      }
     },
     {
-      for i, vm in module.workers : vm.vm_name => vm.tunnel_info
+      for i, vm in module.workers : vm.vm_name => {
+        node_name = vm.vm_name
+        node_ip   = vm.vm_ipv4_address
+        tunnel_port = var.worker_tunnel_ports[i]
+        node_type = "worker"
+      }
     }
   )
 }

@@ -78,9 +78,4 @@ runcmd:
   - systemctl start netfilter-persistent
   - iptables-restore < /etc/iptables/rules.v4
 
-ssh_authorized_keys:
-%{ for key in ssh_public_keys ~}
-  - ${key}
-%{ endfor ~}
-
 final_message: "NAT Gateway setup complete! Management IP: ${nat_gateway_management_ip}, Cluster IP: ${nat_gateway_cluster_ip}"

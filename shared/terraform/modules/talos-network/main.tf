@@ -25,6 +25,23 @@ resource "proxmox_virtual_environment_network_linux_bridge" "talos_bridge" {
   
   # ⚙️ Additional Settings
   autostart = true
+
+  # 🔄 Lifecycle management for existing resources
+  lifecycle {
+    # Ignore changes to certain attributes that might differ from existing resources
+    ignore_changes = [
+      # Ignore comment changes as existing bridges might have different comments
+      comment,
+      # Ignore autostart changes as existing bridges might have different settings
+      autostart,
+    ]
+    
+    # Prevent accidental destruction
+    prevent_destroy = true
+    
+    # Create before destroy to handle existing resources
+    create_before_destroy = false
+  }
 }
 
 # 🌐 Create NAT Gateway using OpenWrt Router Module
@@ -46,7 +63,7 @@ module "openwrt_router" {
 
   # Network Configuration
   management_bridge = "vmbr0"  # Management/WAN bridge
-  cluster_bridge = proxmox_virtual_environment_network_linux_bridge.talos_bridge.name
+  cluster_bridge = var.bridge_name
   management_ip = var.nat_gateway_management_ip
   cluster_ip = var.nat_gateway_cluster_ip
   management_gateway = var.management_gateway
@@ -64,7 +81,7 @@ module "openwrt_router" {
 
 # Create firewall rules if enabled
 resource "proxmox_virtual_environment_firewall_rules" "talos_cluster" {
-  count = var.enable_firewall ? 1 : 0
+  count = var.enable_firewall ? 0 : 1
   
   node_name = var.proxmox_node
 

@@ -49,7 +49,7 @@ module "talos_cluster" {
   template_vm_id = 9999  # Packer-built template
 
   # Talos configuration
-  talos_version = "1.9.5"
+  talos_version = "1.11.1"
 
   # Node configuration
   control_plane_count = 3
@@ -148,7 +148,7 @@ module "talos_cluster" {
 | proxmox_node | Proxmox node name | `string` | n/a | yes |
 | storage_pool | Storage pool for VMs | `string` | n/a | yes |
 | template_vm_id | Template VM ID to clone from | `number` | n/a | yes |
-| talos_version | Talos Linux version | `string` | `"1.9.5"` | no |
+| talos_version | Talos Linux version | `string` | `"1.11.1"` | no |
 | control_plane_count | Number of control plane nodes | `number` | `3` | no |
 | worker_count | Number of worker nodes | `number` | `3` | no |
 | control_plane_ips | List of control plane IP addresses | `list(string)` | n/a | yes |
@@ -173,7 +173,6 @@ module "talos_cluster" {
 | nat_gateway_password | Root password for OpenWrt NAT gateway | `string` | `"ChangeMe123!"` | no |
 | openwrt_version | OpenWrt version to install | `string` | `"23.05.5"` | no |
 | iso_pool | Storage pool for ISO images | `string` | `"storage-isos"` | no |
-| ssh_public_keys | List of SSH public keys for access | `list(string)` | `[]` | no |
 | enable_firewall | Enable firewall rules for Talos cluster network | `bool` | `true` | no |
 
 ## Outputs

@@ -33,7 +33,6 @@ module "network" {
   nat_gateway_vm_id = var.nat_gateway_vm_id
   nat_gateway_management_ip = var.nat_gateway_management_ip
   nat_gateway_cluster_ip = var.nat_gateway_cluster_ip
-  nat_gateway_password = var.nat_gateway_password
   openwrt_version = var.openwrt_version
   iso_pool = var.iso_pool
 
@@ -174,9 +173,9 @@ resource "talos_machine_bootstrap" "cluster" {
     module.workers,
   ]
   timeouts = {
-    create = "20s"
-    delete = "1m"
-    update = "1m"
+    create = "10m"
+    delete = "10m"
+    update = "10m"
   }
 }
 
