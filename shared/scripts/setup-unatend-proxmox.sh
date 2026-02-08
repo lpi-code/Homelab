@@ -268,22 +268,28 @@ build_proxmox_docker_image(){
 }
 
 # Ensure Docker image is available
+_ENSURING_IMAGE=0
 ensure_docker_image(){
+  # Guard against recursive calls (run_proxmox_assistant -> ensure_docker_image -> run_proxmox_assistant -> ...)
+  if [ "$_ENSURING_IMAGE" = "1" ]; then
+    return 0
+  fi
+  _ENSURING_IMAGE=1
+
   # Check if Proxmox image exists
   if ! docker image inspect "$DOCKER_PROXMOX_IMAGE" >/dev/null 2>&1; then
     build_proxmox_docker_image
   fi
-  
+
   # Skip testing in non-debug mode to avoid hanging
   if [ "$DEBUG_API" = "1" ]; then
     note "🧪 Testing Proxmox assistant..."
-    local test_output
-    test_output="$(timeout 10 run_proxmox_assistant --help 2>&1 || true)"
-    
+    local test_output workdir_abs
+    workdir_abs="$(cd "$WORKDIR" && pwd)"
+    test_output="$(timeout 10 $DOCKER_RUN "$workdir_abs:/work" -w /work "$DOCKER_PROXMOX_IMAGE" -c "proxmox-auto-install-assistant --help" 2>&1 || true)"
+
     if echo "$test_output" | grep -q "Usage\|proxmox-auto-install-assistant"; then
       note "✅ Proxmox assistant is working correctly"
-      note "🔍 Assistant help output:"
-      echo "$test_output" | sed 's/^/  /'
     else
       warn "Proxmox assistant test failed, rebuilding image..."
       warn "Test output: $test_output"
@@ -292,6 +298,8 @@ ensure_docker_image(){
   else
     note "✅ Proxmox Docker image ready"
   fi
+
+  _ENSURING_IMAGE=0
 }
 
 # Run Proxmox assistant via Docker
@@ -477,7 +485,7 @@ validate_proxmox_answer_file(){
   fi
   
   # Basic TOML validation (check for required sections)
-  local required_sections=("global" "network" "disk")
+  local required_sections=("global" "network" "disk-setup")
   for section in "${required_sections[@]}"; do
     if ! grep -q "^\[$section\]" "$answer_file"; then
       warn "Missing required section: [$section]"
