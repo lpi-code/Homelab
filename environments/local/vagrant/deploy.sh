@@ -114,6 +114,14 @@ NETWORK_NAME="homelab-local"
 NETWORK_SUBNET="192.168.56.0/24"
 NETWORK_GW="192.168.56.1"
 
+# Ensure IPv4 forwarding is enabled on the host (required for VM internet via NAT)
+if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" != "1" ]; then
+    warn "IPv4 forwarding is disabled. VM will have DNS but no internet."
+    warn "Enable with: sudo sysctl -w net.ipv4.ip_forward=1"
+    warn "Persistent: echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-libvirt-forward.conf && sudo sysctl --system"
+    warn "See: environments/local/TROUBLESHOOTING.md (Vagrant VM: DNS works but no internet)"
+fi
+
 info "Checking libvirt network '$NETWORK_NAME'..."
 if sudo virsh net-info "$NETWORK_NAME" &>/dev/null; then
     # Check if network is active using net-list which is more reliable
@@ -240,6 +248,12 @@ echo ""
 # Change to Vagrant directory
 cd "$SCRIPT_DIR"
 
+# Static IP for pve02 on homelab-local (must match DHCP host in this script and Vagrantfile)
+PVE_STATIC_IP="${PVE_STATIC_IP:-192.168.56.149}"
+
+# Ensure Ansible inventory is set so we can read ansible_host without SSH
+export ANSIBLE_INVENTORY="${ANSIBLE_INVENTORY:-$LOCAL_ENV_DIR/ansible/inventory}"
+
 # Detect user's SSH key and inject for Vagrant (must match keys used in Packer build)
 for key in "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_rsa"; do
     if [ -f "$key" ]; then
@@ -281,6 +295,19 @@ elif vagrant status | grep -q "saved\|poweroff"; then
     fi
 fi
 
+# Use static IP for Vagrant SSH (avoids getaddrinfo if inventory had a hostname)
+# Optionally read from inventory; must be a valid IPv4 so Vagrant never gets a hostname
+IP="$PVE_STATIC_IP"
+if [ -n "${ANSIBLE_INVENTORY:-}" ] && [ -d "$ANSIBLE_INVENTORY" ] || [ -f "$ANSIBLE_INVENTORY" ]; then
+  inv_ip=$(ansible-inventory -i "$ANSIBLE_INVENTORY" --host pve02 2>/dev/null | awk -F': ' '/"ansible_host"/ {gsub(/[",]/, "", $2); print $2}')
+  if [ -n "$inv_ip" ] && [[ "$inv_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    IP="$inv_ip"
+  fi
+fi
+export VAGRANT_PROXMOX_IP="$IP"
+info "VAGRANT_PROXMOX_IP set to $VAGRANT_PROXMOX_IP (Vagrant will SSH to this IP)"
+echo ""
+
 echo ""
 info "Starting Vagrant VM from template..."
 info "This should be much faster than building from ISO (5-10 minutes)"
@@ -299,7 +326,7 @@ info "Proxmox VE Local Environment Ready!"
 info "========================================"
 echo ""
 info "Access Information:"
-info "  Web Interface: https://192.168.56.149:8006"
+info "  Web Interface: https://$IP:8006"
 info "  Username: root"
 info "  Password: vagrantvagrant (change this!)"
 echo ""

@@ -1,0 +1,17 @@
+---
+# Local environment specific variables
+
+# Network configuration
+local_network: "192.168.56.0/24"
+local_gateway: "192.168.56.1"
+
+# Resource constraints for local development
+default_vm_memory: 2048
+default_vm_cores: 2
+default_vm_disk: "20G"
+
+# Backup configuration (disabled by default for local)
+enable_backups: false
+
+# Monitoring (lightweight for local)
+enable_monitoring: false

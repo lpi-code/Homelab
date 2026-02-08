@@ -1,0 +1,99 @@
+---
+# Proxmox VE Configuration for Local Environment
+
+domain: "homelab.local"
+fqdn: "pve02.homelab.local"
+mailto: "admin@homelab.local"
+
+# Proxmox paths
+proxmox_qcow2_image_path: "/var/lib/vz"
+proxmox_import_image_path: "/var/lib/vz/template/import"
+proxmox_iso_path: "/var/lib/vz/template/iso"
+proxmox_validate_certs: false
+
+proxmox:
+  # Repository Configuration
+  repositories:
+    correct_sources: true
+    disable_pve_enterprise: true
+    enable_pve_no_subscription: true
+    correct_ceph_sources_8: true
+    add_pvetest_disabled_8: true
+
+    # 9.x specific
+    migrate_to_deb822_9: true
+    disable_legacy_sources_9: true
+    pve_enterprise_state_9: "disabled"
+    pve_no_subscription_state_9: "enabled"
+    ceph_state_9: "enabled"
+    add_pvetest_disabled_9: true
+
+  # Feature Configuration
+  disable_subscription_nag: true
+  enable_ha: false
+  disable_ha: false
+  disable_corosync_if_disabling_ha: true
+
+  # Update Configuration
+  do_update: true
+  reboot_after: false
+
+# Proxmox Storage Pools Configuration
+# Note: Smaller sizes for local dev environment
+proxmox_default_storage_pool: "storage-vms"
+proxmox_default_iso_pool: "storage-isos"
+proxmox_storage_pools:
+  storage-vms:
+    type: "zfs"
+    content: "images,rootdir"
+    nodes: "{{ hostname }}"
+    disable: false
+    shared: false
+    pool: "storage/vms"
+  storage-backups:
+    type: "dir"
+    content: "backup"
+    nodes: "{{ hostname }}"
+    disable: false
+    shared: false
+    pool: "storage/backups"
+  storage-isos:
+    type: "dir"
+    content: "iso,import"
+    nodes: "{{ hostname }}"
+    disable: false
+    shared: false
+    pool: "storage/isos"
+
+# Proxmox API configuration
+# Credentials imported from secrets.sops.yaml
+proxmox_api_url: "https://{{ ansible_host }}:8006/api2/json"
+
+# VM Template Configuration (reduced resources for local)
+vm_templates:
+  talos:
+    name: "talos-template"
+    memory: 2048
+    cores: 2
+    disk_size: "20G"
+    network_bridge: "vmbr0"
+    version: "1.8.0"
+  openwrt:
+    name: "openwrt-template"
+    memory: 512
+    cores: 1
+    disk_size: "4G"
+    network_bridge: "vmbr0"
+    version: "23.05.3"
+
+# Default VM configuration
+vm_template: "talos-template"
+vm_memory: 2048
+vm_cores: 2
+vm_disk_size: "20G"
+vm_network: "vmbr0"
+vm_tags: "kubernetes,talos,local"
+
+# Template file IDs
+openwrt_template_file_id: "local:vztmpl/openwrt-template.tar.gz"
+talos_image_file_id: "storage-isos:import/talos.qcow2"

@@ -1,5 +1,5 @@
 creation_rules:
   - path_regex: 'secrets\.(yaml|yml|json|env)$'
-    age: "age1r6q7uzp4qmgg8w53pdzmncg5yhmx5smse49ehwjuwys3q2njtu2qkwqwg6"
+    age: "age1mcru7nhu2ct4g30kffqxhy3wxq44vuuawzu4j7frf5qc024uudvq75mpvj"
   - path_regex: '.*\.sops\.(yaml|yml|json)$'
-    age: "age1r6q7uzp4qmgg8w53pdzmncg5yhmx5smse49ehwjuwys3q2njtu2qkwqwg6"
+    age: "age1mcru7nhu2ct4g30kffqxhy3wxq44vuuawzu4j7frf5qc024uudvq75mpvj"

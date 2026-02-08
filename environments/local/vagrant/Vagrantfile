@@ -20,9 +20,23 @@ Vagrant.configure("2") do |config|
   end
   config.ssh.password = "vagrantvagrant"
   config.vm.define "pve02" do |pve|
-    # Hostname comes from Proxmox answer file (pve02.homelab.local); skip Vagrant's /etc/hosts edit
-    # pve.vm.hostname = "pve02"
-    
+    # VM IP on homelab-local (must match deploy.sh DHCP host and host_vars ansible_host)
+    PVE_IP = "192.168.56.149"
+    pve_ssh_ip = (ENV["VAGRANT_PROXMOX_IP"] || PVE_IP).to_s.strip
+    pve_ssh_ip = PVE_IP if pve_ssh_ip.empty?
+    # Force IP only: avoid getaddrinfo "Name or service not known" if hostname was passed
+    pve_ssh_ip = PVE_IP unless pve_ssh_ip =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/
+    pve.ssh.host = pve_ssh_ip
+    pve.vm.boot_timeout = 120
+
+    # homelab-local: deploy.sh creates this and assigns PVE_IP via DHCP. Don't overwrite guest config.
+    pve.vm.network :private_network,
+      ip: PVE_IP,
+      libvirt__network_name: "homelab-local",
+      libvirt__ip_address: PVE_IP,
+      libvirt__mac: "52:54:00:00:56:49",
+      auto_config: false
+
     # Use the Packer-built template
     pve.vm.box = "proxmox-pve02-local"
     
@@ -52,31 +66,23 @@ Vagrant.configure("2") do |config|
       libvirt.nic_model_type = "virtio"
       libvirt.disk_bus = "virtio"
 
-      # Use default management network (vagrant-libvirt creates this with DHCP)
-      # This allows Vagrant to SSH into the VM
+      # Second disk for ZFS storage pool (01-zfs-setup.yml)
+      libvirt.storage :file, :size => "100G", :type => "raw"
+
+      # Management NIC: so "Waiting for domain to get an IP" finishes. SSH uses pve.ssh.host above.
+      # Use distinct MAC so both NICs differ (homelab-local uses 52:54:00:00:56:50 below).
       libvirt.management_network_name = "vagrant-libvirt"
-      libvirt.management_network_keep = true
+      libvirt.management_network_address = "192.168.121.0/24"
+      libvirt.management_network_mac = "52:54:00:00:56:50"
     end
-    # Display access information after boot
+    # If "Waiting for domain to get an IP" never ends, VM may have only one NIC. Run: vagrant destroy -f && vagrant up
+
+    # Show access info after boot
     pve.vm.provision "shell", name: "display-info", run: "always", inline: <<-SHELL
-      # Get the IP address (avoid non-zero exit if no global IP yet, e.g. DHCP not ready)
-      IP=$(ip -4 addr show scope global 2>/dev/null | (grep inet || true) | head -1 | awk '{print $2}' | cut -d/ -f1)
-      [ -z "$IP" ] && IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-      [ -z "$IP" ] && IP="<VM-IP>"
       echo ""
-      echo "=========================================="
-      echo "Proxmox VE Local Development Environment"
-      echo "=========================================="
+      echo "Proxmox VE: https://#{PVE_IP}:8006 (root / vagrantvagrant)"
+      echo "SSH: vagrant ssh"
       echo ""
-      echo "Access Information:"
-      echo "  Web Interface: https://${IP}:8006"
-      echo "  Username: root"
-      echo "  Password: vagrantvagrant (change this!)"
-      echo ""
-      echo "SSH Access:"
-      echo "  vagrant ssh"
-      echo ""
-      echo "=========================================="
     SHELL
   end
 end

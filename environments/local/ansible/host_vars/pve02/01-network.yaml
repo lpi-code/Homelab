@@ -1,0 +1,8 @@
+networks:
+  - name: "talos-net"
+    ipv4_address: "10.10.0.1/24"
+    ipv4_gateway: "10.10.0.1"
+    ipv4_dns_servers: ["1.1.1.1", "8.8.8.8"]
+    enable_nat: true
+    notes: |
+      This network is used for the Talos cluster

@@ -81,24 +81,39 @@
           ansible.builtin.set_fact:
             pool_disks: "{{ pool_disks | default({}) }}"
 
-        - name: Set disk for each pool
+        - name: Gather block device names that are in use (part of a zpool or have mounted partitions)
+          ansible.builtin.shell: |
+            {
+              zpool status -P 2>/dev/null | grep -oE '/dev/[a-z0-9]+' || true
+              findmnt -n -o SOURCE 2>/dev/null | grep -E '^/dev/' || true
+            } | while read d; do
+              b=$(basename "$d")
+              echo "$b" | sed -E 's/p[0-9]+$//; s/[0-9]+$//'
+            done | sort -u
+          register: _disks_in_use_raw
+          changed_when: false
+
+        - name: "Set disks in use list (block devices only: sd/nvme/hd/vd)"
           ansible.builtin.set_fact:
-            pool_disks: >-
-              {{
-                pool_disks | combine({
-                  item.name: '/dev/' + (ansible_devices | dict2items |
-                    selectattr('key', 'search', 'sd') |
-                    selectattr('value.model', 'defined') |
-                    selectattr('value.model', 'search', item.disks | join('|')) |
-                    map(attribute='key') |
-                    list | first)
-                })
-              }}
+            disks_in_use: "{{ (_disks_in_use_raw.stdout_lines | default([])) | select('match', '^(sd|nvme|hd|vd)') | unique | list }}"
+
+        - name: Set disk for each pool (explicit device name, or match by model/host excluding disks in use)
+          ansible.builtin.set_fact:
+            pool_disks: "{{ pool_disks | combine({ item.name: _disk_for_pool }) }}"
           loop: "{{ zfs_pools }}"
+          vars:
+            _disks_join: "{{ item.disks | join('|') }}"
+            # Explicit device names (e.g. vdb, vdb1): use first that exists as block device (whole disk or partition)
+            _all_block_names: "{{ (ansible_devices | default({}) | dict2items | map(attribute='key') | list) + (ansible_devices | default({}) | dict2items | selectattr('value.partitions', 'defined') | map(attribute='value') | map(attribute='partitions') | map('dict2items') | flatten | map(attribute='key') | list) }}"
+            _explicit: "{{ item.disks | select('in', _all_block_names) | list }}"
+            _by_model: "{{ ansible_devices | dict2items | selectattr('key', 'match', '^(sd|nvme|hd|vd)') | selectattr('value.model', 'defined') | selectattr('value.model', 'search', _disks_join) | map(attribute='key') | list }}"
+            _by_host: "{{ ansible_devices | dict2items | selectattr('key', 'match', '^(sd|nvme|hd|vd)') | selectattr('value.host', 'defined') | selectattr('value.host', 'search', _disks_join) | map(attribute='key') | list }}"
+            _candidates: "{{ (_by_model + _by_host) | unique | reject('in', disks_in_use) | list }}"
+            _disk_for_pool: "{{ ('/dev/' + _explicit[0]) if (_explicit | length > 0) else (('/dev/' + _candidates[0]) if (_candidates | length > 0) else omit) }}"
 
         - name: Display found disks for each pool
           ansible.builtin.debug:
-            msg: "Found disks for pool {{ item.name }}: {{ pool_disks[item.name] }}"
+            msg: "Found disks for pool {{ item.name }}: {{ (pool_disks | default({})).get(item.name, '(no disk found)') }}"
           loop: "{{ zfs_pools }}"
 
         - name: Debug pool_disks variable
@@ -108,8 +123,7 @@
         - name: Validate found disks for each pool
           ansible.builtin.assert:
             that:
-              - pool_disks[item.name] is defined
-              - pool_disks[item.name] | length > 0
+              - ((pool_disks | default({})).get(item.name, '') | length) > 0
             fail_msg: "No available disks found for pool {{ item.name }}. All matching disks appear to be in use by existing partitions or LVM. Check disk models in zfs_pools configuration and ensure disks are not already in use."
           loop: "{{ zfs_pools }}"
           
@@ -354,7 +368,7 @@
           ansible.builtin.debug:
             msg: |
               Pool: {{ item.name }}
-              Disk: {{ pool_disks[item.name] | default('UNDEFINED') }}
+              Disk: {{ (pool_disks | default({})).get(item.name, 'UNDEFINED') }}
               Pool config: {{ item.name }}
           loop: "{{ zfs_pools }}"
 
@@ -362,19 +376,21 @@
           ansible.builtin.debug:
             msg: |
               Pool: {{ item.name }}
-              Disk: {{ pool_disks[item.name] }}
-              VDEVs: {{ [pool_disks[item.name]] }}
+              Disk: {{ _pool_disk }}
+              VDEVs: {{ [_pool_disk] }}
               Pool properties: ashift={{ item.ashift | default(zfs_default_ashift) }}
               FS properties: compression={{ item.compression | default(zfs_default_compression) }}
           loop: "{{ zfs_pools }}"
-          when: pool_disks[item.name] is defined and pool_disks[item.name] != "" and pool_disks[item.name] != "None"
+          when: _pool_disk | length > 0
+          vars:
+            _pool_disk: "{{ (pool_disks | default({})).get(item.name, '') }}"
 
         - name: Create or update ZFS pools
           community.general.zpool:
             name: "{{ item.name }}"
             state: present
             vdevs:
-              - disks: "{{ [pool_disks[item.name]] }}"
+              - disks: "{{ [_pool_disk] }}"
             pool_properties:
               ashift: "{{ item.ashift | default(zfs_default_ashift) }}"
             filesystem_properties:
@@ -383,7 +399,9 @@
               atime: "{{ item.atime | default(zfs_default_atime) }}"
               sync: "{{ item.sync | default(zfs_default_sync) }}"
           loop: "{{ zfs_pools }}"
-          when: pool_disks[item.name] is defined and pool_disks[item.name] != "" and pool_disks[item.name] != "None"
+          when: _pool_disk | length > 0
+          vars:
+            _pool_disk: "{{ (pool_disks | default({})).get(item.name, '') }}"
 
         - name: Create datasets for pools (with quota and reservation)
           community.general.zfs:
@@ -541,6 +559,10 @@
       register: storage_exists_check
       failed_when: false
       changed_when: false
+
+    - name: Initialize existing storage list
+      ansible.builtin.set_fact:
+        existing_storage_list: []
 
     - name: existing storage list
       ansible.builtin.set_fact:

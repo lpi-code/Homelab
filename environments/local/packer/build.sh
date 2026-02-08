@@ -25,6 +25,31 @@ BUILD_ISO_SCRIPT="$LOCAL_ENV_DIR/build-iso.sh"
 info "Packer Build Script for Proxmox VE Template"
 echo ""
 
+# Read Proxmox IP from ansible host_vars (single source of truth)
+HOST_VARS_FILE="$LOCAL_ENV_DIR/ansible/host_vars/pve02/00-general.yaml"
+if [ -f "$HOST_VARS_FILE" ]; then
+    PROXMOX_IP=$(grep '^ansible_host:' "$HOST_VARS_FILE" | head -1 | awk '{print $2}' | tr -d '"')
+fi
+if [ -z "${PROXMOX_IP:-}" ]; then
+    error "Could not read ansible_host from $HOST_VARS_FILE"
+    exit 1
+fi
+NETWORK_PREFIX=$(echo "$PROXMOX_IP" | cut -d. -f1-3)
+NETWORK_SUBNET="${NETWORK_PREFIX}.0/24"
+NETWORK_GW="${NETWORK_PREFIX}.1"
+
+# MACs: single source of truth is Vagrantfile (management_network_mac + libvirt__mac, deploy.sh uses homelab MAC)
+VAGRANTFILE="$LOCAL_ENV_DIR/vagrant/Vagrantfile"
+if [ -f "$VAGRANTFILE" ]; then
+    MANAGEMENT_MAC=$(grep -E 'management_network_mac\s*=\s*"[0-9a-fA-F:]+"' "$VAGRANTFILE" | head -1 | sed -n 's/.*"\([^"]*\)".*/\1/p')
+    PROXMOX_MAC=$(grep -E 'libvirt__mac:\s*"[0-9a-fA-F:]+"' "$VAGRANTFILE" | head -1 | sed -n 's/.*libvirt__mac:\s*"\([^"]*\)".*/\1/p')
+fi
+MANAGEMENT_MAC="${MANAGEMENT_MAC:-52:54:00:00:56:49}"
+PROXMOX_MAC="${PROXMOX_MAC:-52:54:00:00:56:50}"
+info "Proxmox IP (from ansible_host): $PROXMOX_IP"
+info "Management MAC (from Vagrantfile): $MANAGEMENT_MAC"
+info "Homelab-local MAC (from Vagrantfile): $PROXMOX_MAC"
+
 # Check prerequisites
 info "Checking prerequisites..."
 MISSING_DEPS=0
@@ -117,8 +142,6 @@ echo ""
 # Ensure libvirt network exists (needed for bridge networking)
 NETWORK_NAME="homelab-local"
 BRIDGE_NAME="virbr-homelab"
-NETWORK_SUBNET="192.168.56.0/24"
-NETWORK_GW="192.168.56.1"
 
 info "Checking libvirt network '$NETWORK_NAME'..."
 if sudo virsh net-info "$NETWORK_NAME" &>/dev/null; then
@@ -140,8 +163,8 @@ else
   <bridge name="${BRIDGE_NAME}" stp="on" delay="0"/>
   <ip address="${NETWORK_GW}" netmask="255.255.255.0">
     <dhcp>
-      <range start="192.168.56.100" end="192.168.56.200"/>
-      <host mac="52:54:00:00:56:49" ip="192.168.56.149"/>
+      <range start="${NETWORK_PREFIX}.100" end="${NETWORK_PREFIX}.200"/>
+      <host mac="${PROXMOX_MAC}" ip="${PROXMOX_IP}"/>
     </dhcp>
   </ip>
 </network>
@@ -217,7 +240,7 @@ info "This will take 30-45 minutes"
 info "The VM will automatically install Proxmox VE and configure it"
 info ""
 info "Note: Using bridge networking - Packer needs sudo for bridge access"
-info "SSH will connect to: 192.168.56.149 (configured in answer file)"
+info "SSH will connect to: $PROXMOX_IP (from ansible_host)"
 echo ""
 
 # Collect SSH public keys to inject into template (default: ~/.ssh/*.pub)
@@ -236,6 +259,9 @@ fi
 sudo PACKER_LOG=1 PACKER_LOG_PATH="$SCRIPT_DIR/packer-build.log" packer build \
     -var "iso_path=$ISO_PATH" \
     -var "bridge_name=$BRIDGE_NAME" \
+    -var "proxmox_ip=$PROXMOX_IP" \
+    -var "management_mac=$MANAGEMENT_MAC" \
+    -var "proxmox_mac=$PROXMOX_MAC" \
     -var "ssh_authorized_keys=$SSH_KEYS_JSON" \
     . || {
     error "Packer build failed"

@@ -5,6 +5,11 @@
   gather_facts: false
 
   vars:
+    # Supported PVE major.minor ranges (inclusive). Key = major (string), value = [min_minor, max_minor]
+    supported_pve_versions:
+      "8": [0, 9]   # 8.0 through 8.9.x
+      "9": [0, 1]   # 9.0 through 9.1
+
     # ===== choices you would have made in whiptail =====
     correct_sources: true
 
@@ -94,8 +99,10 @@
     - name: Assert supported versions
       ansible.builtin.assert:
         that:
-          - (pve_major | int == 8 and (pve_minor | int >= 0 and pve_minor | int <= 9)) or (pve_major | int == 9 and pve_minor | int == 0)
-        fail_msg: "Unsupported PVE version {{ pve_major }}.{{ pve_minor }} (supported: 8.0–8.9.x and 9.0)"
+          - (pve_major | string) in supported_pve_versions
+          - pve_minor | int >= supported_pve_versions[pve_major | string][0]
+          - pve_minor | int <= supported_pve_versions[pve_major | string][1]
+        fail_msg: "Unsupported PVE version {{ pve_major }}.{{ pve_minor }} (supported: 8.0–8.9, 9.0–9.1)"
 
     # =========================
     # Proxmox User Management
@@ -106,6 +113,16 @@
         state: present
         password: "{{ root_password | password_hash('sha512') }}"
         update_password: always
+
+    - name: Apt update and ignore errors
+      ansible.builtin.apt:
+        cache_valid_time: 3600
+      ignore_errors: true
+    
+    - name: Install pip libraries
+      ansible.builtin.apt:
+        name: python3-proxmoxer
+        state: present
      
     - name: Create proxmox api user (instead of using root)
       community.proxmox.proxmox_user:
@@ -206,7 +223,7 @@
             content: |
               # deb http://download.proxmox.com/debian/pve bookworm pvetest
           when: add_pvetest_disabled_8
-      when: pve_major == 8
+      when: pve_major | int == 8
 
     # =========================
     # PVE 9.x (Debian trixie)
@@ -369,7 +386,7 @@
             state: absent
           loop: "{{ ceph_all_sources.files | default([]) }}"
           when: item.path is search('enterprise')
-      when: pve_major == 9
+      when: pve_major | int == 9
 
     # =========================
     # Common post-routines

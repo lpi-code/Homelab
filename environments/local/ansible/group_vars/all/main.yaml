@@ -1,0 +1,20 @@
+---
+# Global variables for local environment
+
+environment_name: "local"
+environment_type: "development"
+is_production: false
+is_local: true
+
+# DNS settings
+dns_servers:
+  - "1.1.1.1"
+  - "8.8.8.8"
+
+# NTP settings
+ntp_servers:
+  - "time.cloudflare.com"
+  - "time.google.com"
+
+# Default gateway (libvirt network)
+default_gateway: "192.168.56.1"

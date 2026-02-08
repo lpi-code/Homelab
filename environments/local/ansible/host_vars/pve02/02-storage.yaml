@@ -1,0 +1,31 @@
+---
+# Storage for local Vagrant PVE (01-zfs-setup.yml).
+# lsblk: single disk vda (220G), vda3 = rpool (Proxmox root).
+# Add a second virtual disk (e.g. vdb) in Vagrant for this pool; the playbook
+# will use the first matching disk that is not already in use (so vdb, not vda).
+
+zfs_pools:
+  - name: "storage"
+    disks:
+      - "vdb"   # Explicit device (Vagrant second disk); use vdb so it's used even if already partitioned
+    ashift: 12
+    compression: "lz4"
+    checksum: "on"
+    atime: "off"
+    sync: "standard"
+    datasets:
+      - name: "vms"
+        mountpoint: "/var/lib/vz"
+        compression: "lz4"
+        quota: ""
+        reservation: ""
+      - name: "backups"
+        mountpoint: "/var/lib/backups"
+        compression: "lz4"
+        quota: ""
+        reservation: ""
+      - name: "isos"
+        mountpoint: "/var/lib/vz/template/iso"
+        compression: "lz4"
+        quota: ""
+        reservation: ""

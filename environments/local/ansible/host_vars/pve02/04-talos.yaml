@@ -1,0 +1,37 @@
+---
+# Talos Kubernetes Cluster Configuration for Local Environment
+
+# Talos cluster configuration (smaller scale for local testing)
+talos_cluster_name: "homelab-local"
+talos_cluster_endpoint: "https://192.168.56.200:6443"
+
+# Control plane nodes (reduced for local)
+talos_control_plane_count: 1
+talos_control_plane_memory: 4096
+talos_control_plane_cores: 2
+talos_control_plane_disk: "20G"
+
+# Worker nodes (minimal for local)
+talos_worker_count: 2
+talos_worker_memory: 4096
+talos_worker_cores: 2
+talos_worker_disk: "30G"
+
+# Network configuration
+talos_network_cidr: "192.168.56.0/24"
+talos_vip: "192.168.56.200"
+talos_pod_cidr: "10.244.0.0/16"
+talos_service_cidr: "10.96.0.0/12"
+
+# VM IDs for Proxmox (300 range for local to avoid conflicts)
+talos_control_plane_vmid_start: 3000
+talos_worker_vmid_start: 3100
+
+# Storage
+talos_storage_pool: "storage-vms"
+
+# Tags
+talos_vm_tags: "talos,kubernetes,local,vagrant"
+
+# Terraform workspace
+terraform_workspace: "local"

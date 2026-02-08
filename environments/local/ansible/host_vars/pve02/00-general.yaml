@@ -1,0 +1,36 @@
+---
+#  ________  ___      ___ _______   ________    _______
+# |\   __  \|\  \    /  /|\  ___ \ |\   __  \  /  ___  \
+# \ \  \|\  \ \  \  /  / | \   __/|\ \  \|\  \/__/|_/  /|
+#  \ \   ____\ \  \/  / / \ \  \_|/_\ \  \\\  \__|//  / /
+#   \ \  \___|\ \    / /   \ \  \_|\ \ \  \\\  \  /  /_/__
+#    \ \__\    \ \__/ /     \ \_______\ \_______\|\________\
+#     \|__|     \|__|/       \|_______|\|_______| \|_______|
+#
+# Local Development Environment (Vagrant)
+# Proxmox VE Hypervisor Configuration
+
+hostname: "pve02"
+# Local homelab-local libvirt network IP (pinned via private_network in Vagrantfile)
+ansible_host: "192.168.56.149"
+ansible_user: "root"
+
+# Vagrant default password - CHANGE THIS via 'vagrant ssh' then 'passwd'
+# Then update in secrets.sops.yaml
+# ansible_password: "vagrant"  # Use for initial setup, then use SSH keys
+
+# SSH configuration for local development
+# Disable host key checking because this is a local dev environment
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+ansible_host_key_checking: false
+
+# Localization (matching dev environment)
+locale:
+  keyboard: "fr"
+  country: "fr"
+  timezone: "Europe/Paris"
+
+# Environment markers
+environment: "local"
+environment_type: "development"
+is_vagrant: true
