@@ -1,0 +1,82 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Vagrant configuration for deploying Proxmox VE from Packer template
+
+Vagrant.configure("2") do |config|
+  # Disable Vagrant's fstab modification (synced folders disabled anyway)
+  config.vm.allow_fstab_modification = false
+  # Disable NFS - we don't use synced folders for Proxmox
+  config.nfs.functional = false
+  # SSH: connect as root (Proxmox uses root, no vagrant user)
+  config.ssh.username = "root"
+  # Do not use sudo when running commands over SSH (we are already root)
+  config.ssh.sudo_command = "%c"
+  # Key path injected by deploy.sh via VAGRANT_SSH_PRIVATE_KEY (must match Packer build keys)
+  config.ssh.insert_key = true
+  if ENV["VAGRANT_SSH_PRIVATE_KEY"]
+    key_path = File.expand_path(ENV["VAGRANT_SSH_PRIVATE_KEY"])
+    config.ssh.private_key_path = key_path if File.exist?(key_path)
+  end
+  config.ssh.password = "vagrantvagrant"
+  config.vm.define "pve02" do |pve|
+    # Hostname comes from Proxmox answer file (pve02.homelab.local); skip Vagrant's /etc/hosts edit
+    # pve.vm.hostname = "pve02"
+    
+    # Use the Packer-built template
+    pve.vm.box = "proxmox-pve02-local"
+    
+    pve.vm.allow_fstab_modification = false
+    # Disable synced folder (Proxmox doesn't need it)
+    pve.vm.synced_folder ".", "/vagrant", disabled: true
+
+    # Provider-specific configuration for libvirt (KVM)
+    pve.vm.provider "libvirt" do |libvirt|
+      # Use system session for proper network access
+      libvirt.qemu_use_session = false
+
+      # VM resources
+      libvirt.memory = 20480  # 20GB RAM
+      libvirt.cpus = 8        # 8 CPU cores
+
+      # Enable nested virtualization (required for Proxmox to run VMs)
+      libvirt.nested = true
+      libvirt.cpu_mode = "host-passthrough"
+
+      # Graphics and video
+      libvirt.graphics_type = "spice"
+      libvirt.video_type = "qxl"
+      libvirt.video_vram = 16384
+
+      # Disk and NIC settings
+      libvirt.nic_model_type = "virtio"
+      libvirt.disk_bus = "virtio"
+
+      # Use default management network (vagrant-libvirt creates this with DHCP)
+      # This allows Vagrant to SSH into the VM
+      libvirt.management_network_name = "vagrant-libvirt"
+      libvirt.management_network_keep = true
+    end
+    # Display access information after boot
+    pve.vm.provision "shell", name: "display-info", run: "always", inline: <<-SHELL
+      # Get the IP address (avoid non-zero exit if no global IP yet, e.g. DHCP not ready)
+      IP=$(ip -4 addr show scope global 2>/dev/null | (grep inet || true) | head -1 | awk '{print $2}' | cut -d/ -f1)
+      [ -z "$IP" ] && IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+      [ -z "$IP" ] && IP="<VM-IP>"
+      echo ""
+      echo "=========================================="
+      echo "Proxmox VE Local Development Environment"
+      echo "=========================================="
+      echo ""
+      echo "Access Information:"
+      echo "  Web Interface: https://${IP}:8006"
+      echo "  Username: root"
+      echo "  Password: vagrantvagrant (change this!)"
+      echo ""
+      echo "SSH Access:"
+      echo "  vagrant ssh"
+      echo ""
+      echo "=========================================="
+    SHELL
+  end
+end
