@@ -24,3 +24,22 @@ override.tf.json
 
 # Include override files you do wish to add to version control using negated pattern
 # !example_override.tf
+
+# Vagrant
+.vagrant/
+*.log
+Vagrantfile.old-*
+
+# Packer
+packer/output-*/
+packer/packer_cache/
+packer/crash.log
+*.log
+packer-build.log
+
+# Templates are version controlled but large
+# Uncomment if you don't want to track templates
+*.qcow2
+
+# Proxmox ISO (large file - rebuild as needed)
+*.iso
