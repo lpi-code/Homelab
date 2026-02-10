@@ -1,5 +1,5 @@
 ---
-- name: Create VM Templates with Packer
+- name: Create VM Templates
   hosts: pve
   become: yes
   gather_facts: no
@@ -7,35 +7,23 @@
     - community.general
   vars:
     packer_dir: "{{ lookup('env', 'SHARED_DIR_PATH') }}/packer"
-    talos_packer_config: "{{ packer_dir }}/talos/talos-template.pkr.hcl"
-    openwrt_packer_config: "{{ packer_dir }}/openwrt/openwrt-template.pkr.hcl"
-    proxmox_lxc_template_path: "{{ proxmox_default_lxc_template_path | default('/var/lib/vz/template/cache') }}"
+    opnsense_packer_dir: "{{ packer_dir }}/opnsense"
 
-    # Template configuration
-    talos_template_name: "talos-template"
-    openwrt_template_name: "openwrt-template"
-    
-    # VM resource configuration (defaults)
-    talos_vm_memory_default: 2048
-    talos_vm_cores_default: 2
-    talos_vm_disk_size_default: "20G"
-    
-    openwrt_vm_memory_default: 512
-    openwrt_vm_cores_default: 1
-    openwrt_vm_disk_size_default: "4G"    
-    # Network configuration
-    vm_network_bridge_default: "vmbr0"
-    
     # Version configuration (defaults)
     talos_version_default: "1.11.1"
-    openwrt_version_default: "23.05.3"
+    opnsense_version_default: "26.1"
+    opnsense_template_vm_id: 9000
+
+    # OPNsense ISO
+    opnsense_iso_name: "OPNsense-{{ opnsense_version | default(opnsense_version_default) }}-dvd-amd64.iso"
+    opnsense_iso_bz2_url: "https://pkg.opnsense.org/releases/{{ opnsense_version | default(opnsense_version_default) }}/{{ opnsense_iso_name }}.bz2"
 
   pre_tasks:
     - name: Check if Proxmox storage pools exist
       command: pvesm status
       register: storage_status
       changed_when: false
-      
+
     - name: Extract available storage pool names
       set_fact:
         available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
@@ -49,15 +37,61 @@
       fail:
         msg: "ISO storage pool 'storage-isos' not found. Available pools: {{ available_storage_pools }}"
       when: '"storage-isos" not in available_storage_pools'
-    
-    - name: Create import directory
+
+    - name: Get storage-isos path from Proxmox (so ISO lands in storage-isos, not local)
+      ansible.builtin.shell: |
+        awk '
+        /^(dir|lvm|zfspool):[ \t]*{{ proxmox_default_iso_pool }}([ \t]|$)/ {
+          if (match($0, /path[ \t]+[^ \t]+/)) { print substr($0, RSTART+length("path")+1, RLENGTH-length("path")-1); done=1; exit 0 }
+          found=1; next
+        }
+        found && /^[ \t]*path[ \t]/ { print $2; done=1; exit 0 }
+        found && /^[a-z]/ { found=0 }
+        END { if (!done) exit 1 }
+        ' /etc/pve/storage.cfg
+      register: storage_iso_path_result
+      changed_when: false
+      failed_when: storage_iso_path_result.rc != 0 or (storage_iso_path_result.stdout | trim | length) == 0
+
+    - name: Set storage ISO path for template operations
+      ansible.builtin.set_fact:
+        storage_iso_path: "{{ storage_iso_path_result.stdout | trim }}"
+
+    - name: Create import directory (on storage-isos)
       file:
-        path: "{{ proxmox_iso_path }}/import"
+        path: "{{ storage_iso_path }}/import"
         state: directory
         mode: '0755'
-      register: import_directory_result
+
+    - name: Check if VM bridge exists
+      ansible.builtin.command: ip link show "{{ vm_network | default('vmbr0') }}"
+      register: vm_bridge_check
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure VM bridge exists (required for Packer-built VMs)
+      block:
+        - name: Add VM bridge stanza to network interfaces
+          ansible.builtin.blockinfile:
+            path: /etc/network/interfaces
+            block: |
+              # Bridge for VMs (managed by create-vm-template playbook)
+              auto {{ vm_network | default('vmbr0') }}
+              iface {{ vm_network | default('vmbr0') }} inet manual
+                  bridge_ports none
+                  bridge_stp off
+                  bridge_fd 0
+            marker: "# {mark} ANSIBLE MANAGED - vm bridge for VMs"
+            create: true
+
+        - name: Bring up VM bridge
+          ansible.builtin.shell: "ifup {{ vm_network | default('vmbr0') }}"
+          args:
+            executable: /bin/bash
+      when: vm_bridge_check.rc != 0
 
   tasks:
+    # --- Talos Image (downloaded from Image Factory) ---
     - name: Generate Talos image using Image Factory
       block:
         - name: Generate Talos configuration
@@ -75,60 +109,176 @@
           register: talos_config_response
           delegate_to: localhost
           become: no
-          
+
         - name: Extract Talos image URL from response
           set_fact:
             talos_image_url: "https://factory.talos.dev/image/{{ talos_config_response.json.id }}/{{ talos_version | default(talos_version_default) }}/nocloud-amd64.qcow2"
-            
+
         - name: Download Talos image (qcow2) (read-only)
           get_url:
             url: "{{ talos_image_url }}"
-            dest: "{{ proxmox_iso_path }}/import/talos.qcow2"
+            dest: "{{ storage_iso_path }}/import/talos.qcow2"
             mode: '0444'
             timeout: 600
           register: talos_download_result
 
-    - name: Create OpenWrt LXC template
+    # --- OPNsense Template (built with Packer) ---
+    - name: Build OPNsense VM template with Packer
       block:
-        - name: Check if OpenWrt LXC template exists
+        - name: Check if OPNsense template VM already exists
+          command: "qm status {{ opnsense_template_vm_id }}"
+          register: opnsense_template_check
+          changed_when: false
+          failed_when: false
+
+        - name: Check if OPNsense ISO exists on Proxmox storage (current path)
           stat:
-            path: "{{ proxmox_lxc_template_path }}/vztmpl/openwrt-template.tar.gz"
-          register: openwrt_template_stat
-          
-        - name: Download OpenWrt LXC template
+            path: "{{ storage_iso_path }}/template/iso/{{ opnsense_iso_name }}"
+          register: opnsense_iso_stat_new
+
+        - name: Check if OPNsense ISO exists on Proxmox storage (legacy path)
+          stat:
+            path: "{{ storage_iso_path }}/iso/{{ opnsense_iso_name }}"
+          register: opnsense_iso_stat_legacy
+
+        - name: Set OPNsense ISO exists fact (current or legacy path)
+          set_fact:
+            opnsense_iso_stat:
+              stat: { exists: "{{ opnsense_iso_stat_new.stat.exists | default(false) or opnsense_iso_stat_legacy.stat.exists | default(false) }}" }
+
+        - name: Check if OPNsense ISO or bz2 exist in /tmp (for idempotent download/decompress)
+          stat:
+            path: "{{ item }}"
+          loop:
+            - "/tmp/{{ opnsense_iso_name }}"
+            - "/tmp/{{ opnsense_iso_name }}.bz2"
+          register: opnsense_tmp_stats
+          when: not opnsense_iso_stat.stat.exists
+
+        - name: Set idempotent facts for OPNsense ISO in /tmp
+          set_fact:
+            opnsense_tmp_iso_exists: "{{ opnsense_tmp_stats.results[0].stat.exists | default(false) }}"
+            opnsense_tmp_bz2_exists: "{{ opnsense_tmp_stats.results[1].stat.exists | default(false) }}"
+          when:
+            - not opnsense_iso_stat.stat.exists
+            - opnsense_tmp_stats.results is defined
+            - opnsense_tmp_stats.results | length >= 2
+
+        - name: Ensure ISO storage subdirectory exists
+          file:
+            path: "{{ storage_iso_path }}/template/iso"
+            state: directory
+            mode: '0755'
+          when:
+            - not opnsense_iso_stat.stat.exists
+            - opnsense_template_check.rc != 0
+
+        - name: Download OPNsense DVD ISO (compressed)
           get_url:
-            # Download OpenWrt LXC template from official repository
-            url: "https://downloads.openwrt.org/releases/{{ openwrt_version | default(openwrt_version_default) }}/targets/x86/64/openwrt-{{ openwrt_version | default(openwrt_version_default) }}-x86-64-rootfs.tar.gz"
-            dest: "{{ proxmox_lxc_template_path }}/openwrt-template.tar.gz"
+            url: "{{ opnsense_iso_bz2_url }}"
+            dest: "/tmp/{{ opnsense_iso_name }}.bz2"
             mode: '0644'
-            timeout: 300
-          when: not openwrt_template_stat.stat.exists
-          register: openwrt_template_download
-          
+            timeout: 600
+          when:
+            - not opnsense_iso_stat.stat.exists
+            - opnsense_template_check.rc != 0
+            - not opnsense_tmp_iso_exists | default(false)
+            - not opnsense_tmp_bz2_exists | default(false)
+          register: opnsense_iso_download
+
+        - name: Decompress OPNsense ISO
+          command: "bunzip2 -k /tmp/{{ opnsense_iso_name }}.bz2"
+          args:
+            creates: "/tmp/{{ opnsense_iso_name }}"
+          when:
+            - not opnsense_iso_stat.stat.exists
+            - opnsense_template_check.rc != 0
+            - not opnsense_tmp_iso_exists | default(false)
+
+        - name: Copy OPNsense ISO to Proxmox ISO storage
+          copy:
+            src: "/tmp/{{ opnsense_iso_name }}"
+            dest: "{{ storage_iso_path }}/template/iso/{{ opnsense_iso_name }}"
+            mode: '0644'
+            remote_src: yes
+          when:
+            - not opnsense_iso_stat.stat.exists
+            - opnsense_template_check.rc != 0
+
+        - name: Clean up temporary ISO files
+          file:
+            path: "/tmp/{{ item }}"
+            state: absent
+          loop:
+            - "{{ opnsense_iso_name }}.bz2"
+            - "{{ opnsense_iso_name }}"
+          when:
+            - opnsense_template_check.rc != 0
+            - not opnsense_iso_stat.stat.exists
+
+        - name: Initialize Packer plugins
+          command: "packer init {{ opnsense_packer_dir }}/opnsense.pkr.hcl"
+          delegate_to: localhost
+          become: no
+          when: opnsense_template_check.rc != 0
+
+        - name: Build OPNsense template with Packer
+          command: >
+            packer build
+            -var "proxmox_url=https://{{ ansible_host }}:8006/api2/json"
+            -var "proxmox_username={{ proxmox_user }}@pve"
+            -var "proxmox_password={{ proxmox_password }}"
+            -var "proxmox_node={{ inventory_hostname }}"
+            -var "proxmox_storage_pool={{ proxmox_default_storage_pool }}"
+            -var "proxmox_iso_pool={{ proxmox_default_iso_pool }}"
+            -var "opnsense_version={{ opnsense_version | default(opnsense_version_default) }}"
+            -var "template_vm_id={{ opnsense_template_vm_id }}"
+            -var "network_bridge={{ vm_network | default('vmbr0') }}"
+            {{ opnsense_packer_dir }}/opnsense.pkr.hcl
+          environment:
+            PACKER_LOG: "1"
+          delegate_to: localhost
+          become: no
+          when: opnsense_template_check.rc != 0
+          register: packer_build_result
+
+        - name: Display Packer build result
+          debug:
+            msg: "OPNsense template built successfully (VM ID: {{ opnsense_template_vm_id }})"
+          when: packer_build_result is changed
+
+        - name: Show Packer build failure output (PACKER_LOG and stderr)
+          debug:
+            msg:
+              - "Packer build failed. stdout:"
+              - "{{ packer_build_result.stdout_lines | default([]) }}"
+              - "stderr: {{ packer_build_result.stderr_lines | default([]) }}"
+          when: opnsense_template_check.rc != 0 and packer_build_result is failed
+
+        - name: OPNsense template already exists
+          debug:
+            msg: "OPNsense template VM {{ opnsense_template_vm_id }} already exists, skipping build"
+          when: opnsense_template_check.rc == 0
+
   post_tasks:
     - name: Verify VM templates were created
       command: qm list --full
       register: final_vm_templates
       changed_when: false
-      
-    - name: Verify LXC templates were created
-      command: pveam available
-      register: final_lxc_templates
-      changed_when: false
-      
+
     - name: Display created templates
       debug:
-        msg: 
+        msg:
           - "Available VM templates: {{ final_vm_templates.stdout_lines }}"
-          - "Available LXC templates: {{ final_lxc_templates.stdout_lines }}"
-        
-    - name: Set template facts for other playbooks
-      set_fact:
-        talos_template_available: "{{ talos_template_name in final_vm_templates.stdout }}"
-        openwrt_template_available: "{{ openwrt_template_stat.stat.exists }}"
-        
+
+    - name: Verify OPNsense template exists
+      command: "qm status {{ opnsense_template_vm_id }}"
+      register: opnsense_verify
+      changed_when: false
+      failed_when: false
+
     - name: Display template availability status
       debug:
         msg:
-          - "Talos VM template available: {{ talos_template_available }}"
-          - "OpenWrt LXC template available: {{ openwrt_template_available }}"
+          - "Talos qcow2 image available: {{ talos_download_result is succeeded }}"
+          - "OPNsense VM template available: {{ opnsense_verify.rc == 0 }}"
