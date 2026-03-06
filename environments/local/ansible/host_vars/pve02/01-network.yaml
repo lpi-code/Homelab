@@ -1,3 +1,8 @@
+---
+# Network Configuration — Local Environment
+# Variable names must match the direct_mappings keys in shared/scripts/get-ansible-vars.py
+# so that Terraform picks them up via data.external.ansible_vars.
+
 networks:
   - name: "talos-net"
     ipv4_address: "10.10.0.1/24"
@@ -5,4 +10,17 @@ networks:
     ipv4_dns_servers: ["1.1.1.1", "8.8.8.8"]
     enable_nat: true
     notes: |
-      This network is used for the Talos cluster
+      Isolated bridge for the Talos cluster.
+      Proxmox acts as gateway with iptables masquerade.
+
+# Cluster bridge (vmbr1)
+bridge_name: "vmbr1"
+talos_network_cidr: "10.10.0.0/24"
+talos_network_gateway: "10.10.0.1"
+
+# Management network (Vagrant libvirt)
+management_network_cidr: "192.168.56.0/24"
+management_gateway: "192.168.56.1"
+
+# Firewall — enable for proper isolation
+enable_firewall: true

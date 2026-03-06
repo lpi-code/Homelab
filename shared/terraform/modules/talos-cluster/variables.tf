@@ -26,6 +26,12 @@ variable "talos_version" {
   }
 }
 
+variable "kubernetes_version" {
+  description = "Kubernetes version — must be compatible with talos_version"
+  type        = string
+  default     = "1.33.1"
+}
+
 # Node Configuration
 variable "control_plane_count" {
   description = "Number of control plane nodes"
@@ -141,7 +147,7 @@ variable "talos_network_cidr" {
 }
 
 variable "talos_network_gateway" {
-  description = "Gateway for the Talos cluster network"
+  description = "Gateway for the Talos cluster network (Proxmox bridge IP)"
   type        = string
   validation {
     condition     = can(regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$", var.talos_network_gateway))
@@ -164,57 +170,6 @@ variable "management_gateway" {
   validation {
     condition     = can(regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$", var.management_gateway))
     error_message = "Management gateway must be a valid IP address."
-  }
-}
-
-# NAT Gateway Configuration
-variable "enable_nat_gateway" {
-  description = "Enable NAT gateway for Talos cluster internet access"
-  type        = bool
-}
-
-variable "nat_gateway_vm_id" {
-  description = "VM ID for the NAT gateway"
-  type        = number
-  validation {
-    condition     = var.nat_gateway_vm_id > 0 && var.nat_gateway_vm_id < 10000
-    error_message = "NAT gateway VM ID must be between 1 and 9999."
-  }
-}
-
-variable "nat_gateway_management_ip" {
-  description = "Management IP for the NAT gateway (WAN interface)"
-  type        = string
-  validation {
-    condition     = can(cidrhost(var.nat_gateway_management_ip, 0))
-    error_message = "NAT gateway management IP must be a valid IP address with CIDR notation."
-  }
-}
-
-variable "nat_gateway_cluster_ip" {
-  description = "Cluster network IP for the NAT gateway (LAN interface)"
-  type        = string
-  validation {
-    condition     = can(cidrhost(var.nat_gateway_cluster_ip, 0))
-    error_message = "NAT gateway cluster IP must be a valid IP address with CIDR notation."
-  }
-}
-
-variable "openwrt_version" {
-  description = "OpenWrt version to install"
-  type        = string
-  validation {
-    condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.openwrt_version))
-    error_message = "OpenWrt version must be in format X.Y.Z (e.g., 23.05.5)."
-  }
-}
-
-variable "openwrt_template_file_id" {
-  description = "Template file ID for the OpenWrt LXC container"
-  type        = string
-  validation {
-    condition     = can(regex("^[a-zA-Z0-9_-]+:[a-zA-Z0-9_/.-]+$", var.openwrt_template_file_id))
-    error_message = "OpenWrt template file ID must be in format 'pool:path'."
   }
 }
 

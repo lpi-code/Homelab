@@ -11,21 +11,6 @@ output "bridge_ipv4_address" {
   value       = module.network.bridge_ipv4_address
 }
 
-output "nat_gateway_vm_id" {
-  description = "NAT gateway VM ID"
-  value       = module.network.nat_gateway_vm_id
-}
-
-output "nat_gateway_management_ip" {
-  description = "NAT gateway management IP (WAN)"
-  value       = module.network.nat_gateway_management_ip
-}
-
-output "nat_gateway_cluster_ip" {
-  description = "NAT gateway cluster IP (LAN)"
-  value       = module.network.nat_gateway_cluster_ip
-}
-
 # Cluster Outputs
 output "cluster_name" {
   description = "Name of the Talos cluster"
@@ -169,6 +154,12 @@ output "all_tunnel_info" {
 
 output "kubeconfig" {
   description = "Kubeconfig"
-  value       = data.talos_cluster_kubeconfig.cluster.kubeconfig_raw
+  value       = talos_cluster_kubeconfig.cluster.kubeconfig_raw
+  sensitive   = true
+}
+
+output "talosconfig" {
+  description = "Talosconfig"
+  value       = data.talos_client_configuration.cluster.talos_config
   sensitive   = true
 }

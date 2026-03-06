@@ -1,0 +1,182 @@
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Local Environment: Packer + Vagrant Workflow              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                              ┌─────────────────┐
+                              │  quickstart.sh  │
+                              │   (Start Here)  │
+                              └────────┬────────┘
+                                       │
+                      ┌────────────────┴────────────────┐
+                      │                                 │
+                      ▼                                 ▼
+          ┌─────────────────────┐          ┌──────────────────────┐
+          │  Template Missing?  │          │  Template Exists?    │
+          │   Build Required    │          │   Deploy Only        │
+          └─────────┬───────────┘          └──────────┬───────────┘
+                    │                                  │
+                    ▼                                  │
+    ┌───────────────────────────────────┐             │
+    │         PHASE 1: PACKER           │             │
+    │   (One-time or when updating)     │             │
+    └───────────────────────────────────┘             │
+                    │                                  │
+                    ▼                                  │
+    ┌───────────────────────────────────┐             │
+    │  packer/build.sh                  │             │
+    │  ├─ Check prerequisites           │             │
+    │  ├─ Build unattended ISO          │             │
+    │  ├─ Initialize Packer             │             │
+    │  ├─ Validate template             │             │
+    │  └─ Build VM template             │             │
+    │     └─ Output: templates/         │             │
+    │        proxmox-pve02.qcow2        │             │
+    │     ⏱  Time: 30-45 minutes        │             │
+    └───────────────┬───────────────────┘             │
+                    │                                  │
+                    └──────────────────────────────────┘
+                                       │
+                                       ▼
+    ┌───────────────────────────────────────────────────┐
+    │         PHASE 2: VAGRANT                          │
+    │   (Repeatable, fast deployments)                  │
+    └───────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+    ┌───────────────────────────────────────────────────┐
+    │  vagrant/deploy.sh                                │
+    │  ├─ Check prerequisites                           │
+    │  ├─ Verify template exists                        │
+    │  ├─ Convert to Vagrant box                        │
+    │  ├─ Setup libvirt network                         │
+    │  └─ Deploy VM from template                       │
+    │     ⏱  Time: 5-10 minutes                         │
+    └───────────────┬───────────────────────────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────────────────────────┐
+    │         DEPLOYED PROXMOX VM                       │
+    │  🌐 Web: https://192.168.56.149:8006             │
+    │  👤 User: root                                    │
+    │  🔑 Pass: vagrant                                 │
+    │  💻 SSH: vagrant ssh                              │
+    └───────────────┬───────────────────────────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────────────────────────┐
+    │         ANSIBLE CONFIGURATION                     │
+    │  (Optional - same as before)                      │
+    │  ├─ 00-post-install-pve.yml                       │
+    │  ├─ 01-zfs-setup.yml                              │
+    │  ├─ 02-create-vm-template.yml                     │
+    │  └─ 03-deploy-talos-cluster.yml                   │
+    └───────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          RAPID ITERATION CYCLE                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    cd environments/local/vagrant
+    
+    ┌───────────────────┐
+    │   vagrant up      │  ← Deploy VM (5-10 min)
+    └─────────┬─────────┘
+              │
+              ▼
+    ┌───────────────────┐
+    │   Test Changes    │  ← Make changes, run tests
+    └─────────┬─────────┘
+              │
+              ▼
+    ┌───────────────────┐
+    │ vagrant destroy   │  ← Clean up (1 min)
+    └─────────┬─────────┘
+              │
+              └────────────┐
+                           │
+    ┌──────────────────────┘
+    │
+    └─────► Repeat! (Fast because of template)
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          FILE ORGANIZATION                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+environments/local/
+│
+├─ 📁 packer/                    ← Template Builder (Phase 1)
+│  ├─ build.sh                   ← Run to build template
+│  ├─ proxmox-pve02.pkr.hcl     ← Packer configuration
+│  ├─ README.md                  ← Packer docs
+│  └─ templates/
+│     └─ proxmox-pve02.qcow2    ← Built template (10GB)
+│
+├─ 📁 vagrant/                   ← VM Deployer (Phase 2)
+│  ├─ deploy.sh                  ← Run to deploy VM
+│  ├─ Vagrantfile                ← Vagrant configuration
+│  ├─ README.md                  ← Vagrant docs
+│  └─ .vagrant/                  ← State (auto-generated)
+│
+├─ quickstart.sh                 ← 🌟 Start here! Interactive guide
+├─ build-iso.sh                  ← Used by Packer (auto-called)
+├─ README.md                     ← Overview & getting started
+├─ MIGRATION.md                  ← Migration guide
+└─ PACKER-VAGRANT-SUMMARY.md    ← This document
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      TIME COMPARISON                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+OLD WORKFLOW (Direct ISO):
+    ┌──────────────────────────────────────────────┐
+    │  Every deployment: 30-45 minutes            │
+    │  ████████████████████████████████           │
+    └──────────────────────────────────────────────┘
+
+NEW WORKFLOW (Packer + Vagrant):
+    First time:
+    ┌──────────────────────────────────────────────┐
+    │  Build template: 30-45 minutes               │
+    │  ████████████████████████████████           │
+    └──────────────────────────────────────────────┘
+    
+    Every subsequent deployment:
+    ┌──────────────┐
+    │  5-10 min    │
+    │  ███████     │
+    └──────────────┘
+    
+    💡 70-85% faster for repeated deployments!
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      WHEN TO USE WHAT                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Use packer/build.sh when:
+  ✓ First time setup
+  ✓ Proxmox version upgrade
+  ✓ Base system changes needed
+  ✓ Monthly security updates
+  ✓ Template customization
+  📅 Frequency: Monthly or as needed
+
+Use vagrant/deploy.sh when:
+  ✓ Daily development
+  ✓ Testing infrastructure changes
+  ✓ Multiple VM deployments
+  ✓ Clean slate needed
+  ✓ After destroying old VM
+  📅 Frequency: Daily or multiple times per day
+
+Use quickstart.sh when:
+  ✓ Not sure what to do
+  ✓ First time user
+  ✓ Want interactive guide
+  ✓ Switching between workflows
+  📅 Frequency: Anytime
+```

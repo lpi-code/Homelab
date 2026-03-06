@@ -78,6 +78,20 @@ variable "bridge_name" {
   description = "Bridge interface for VM networking (from homelab-local libvirt network)"
 }
 
+# Management NIC (enp0s8). Must match libvirt.management_network_mac in Vagrantfile.
+variable "management_mac" {
+  type        = string
+  default     = "52:54:00:00:56:49"
+  description = "MAC for management NIC (Vagrant SSH); keep in sync with Vagrantfile management_network_mac"
+}
+
+# Homelab-local NIC (enp0s7). Must match libvirt__mac in Vagrantfile and deploy.sh DHCP reservation.
+variable "proxmox_mac" {
+  type        = string
+  default     = "52:54:00:00:56:50"
+  description = "MAC for homelab-local NIC (Proxmox access); keep in sync with Vagrantfile libvirt__mac"
+}
+
 variable "ssh_authorized_keys" {
   type        = list(string)
   default     = []
@@ -109,6 +123,13 @@ variable "hcp_client_secret" {
   default     = env("HCP_CLIENT_SECRET")
   description = "HCP service principal client secret (or set HCP_CLIENT_SECRET env). Used only for vagrant-registry upload."
   sensitive   = true
+}
+
+# Derived network values from proxmox_ip
+locals {
+  ip_octets      = split(".", var.proxmox_ip)
+  network_prefix = join(".", slice(local.ip_octets, 0, 3))
+  network_gw     = "${local.network_prefix}.1"
 }
 
 # Source definition for QEMU/KVM
@@ -203,20 +224,32 @@ build {
     ]
   }
 
-  # Configure /etc/network/interfaces for DHCP (vmbr0 bridge over enp1s0)
+  # Configure /etc/network/interfaces for the Vagrant deployment layout:
+  #   enp0s6 = management network (Vagrant SSH, DHCP)
+  #   enp0s7 = homelab-local network (Proxmox access, static IP from ansible_host)
   provisioner "shell" {
     inline = [
-      "echo 'Configuring /etc/network/interfaces for DHCP (vmbr0)...'",
+      "echo 'Configuring /etc/network/interfaces (static IP: ${var.proxmox_ip})...'",
       "cat > /etc/network/interfaces << 'EOF'",
       "auto lo",
       "iface lo inet loopback",
       "",
-      "auto enp1s0",
-      "iface enp1s0 inet manual",
+      "# Management network (Vagrant SSH) - MAC matches Vagrantfile management_network_mac",
+      "auto enp0s7",
+      "iface enp0s7 inet dhcp",
+      "    hwaddress ether ${var.management_mac}",
       "",
-      "auto enp0s6",
-      "iface enp0s6 inet dhcp",
-      "    bridge-ports enp0s6",
+      "# WAN bridge — enp0s8 enslaved to vmbr0 so both the Proxmox host and OPNsense WAN",
+      "# share the homelab-local (192.168.56.0/24) network.",
+      "auto enp0s8",
+      "iface enp0s8 inet manual",
+      "    hwaddress ether ${var.proxmox_mac}",
+      "",
+      "auto vmbr0",
+      "iface vmbr0 inet static",
+      "    address ${var.proxmox_ip}/24",
+      "    gateway ${local.network_gw}",
+      "    bridge-ports enp0s8",
       "    bridge-stp off",
       "    bridge-fd 0",
       "EOF",

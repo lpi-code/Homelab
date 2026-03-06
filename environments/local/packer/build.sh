@@ -179,7 +179,7 @@ fi
 # Verify bridge exists
 if ! ip link show "$BRIDGE_NAME" &>/dev/null; then
     error "Bridge '$BRIDGE_NAME' not found. The libvirt network may not be properly configured."
-    error "Try: sudo virsh net-destroy $NETWORK_NAME && sudo virsh net-start $NETWORK_NAME"
+    error "Try: sudo virsh net-destroy $NETWORK_NAME && sudo virsh net-start $NETWORK_NAME && sudo virsh net-undefine"
     exit 1
 fi
 info "Bridge '$BRIDGE_NAME' is available"
@@ -195,6 +195,11 @@ sudo packer init . || {
 }
 
 echo ""
+
+
+# Cleanup old output
+info "Cleaning up previous packer"
+rm -rf output-proxmox-pve02
 
 # Validate Packer template
 info "Validating Packer template..."

@@ -1,37 +1,38 @@
 ---
-# Talos Kubernetes Cluster Configuration for Local Environment
+# Talos Kubernetes Cluster Configuration — Local Environment
+# Variable names must match the direct_mappings keys in shared/scripts/get-ansible-vars.py
+# so that Terraform picks them up via data.external.ansible_vars.
 
-# Talos cluster configuration (smaller scale for local testing)
-talos_cluster_name: "homelab-local"
-talos_cluster_endpoint: "https://192.168.56.200:6443"
+cluster_name: "homelab-local"
+talos_version: "1.11.1"
+proxmox_node: "pve02"
+talos_storage_pool: "local-zfs"
 
-# Control plane nodes (reduced for local)
-talos_control_plane_count: 1
-talos_control_plane_memory: 4096
-talos_control_plane_cores: 2
-talos_control_plane_disk: "20G"
+# Control plane — 1 node for local dev
+control_plane_count: 1
+control_plane_ips:
+  - "10.10.0.10"
+control_plane_vm_ids:
+  - 3000
+control_plane_cores: 2
+control_plane_memory: 4096
+control_plane_disk_size: "10G"
+# Tunnel: localhost:5802 → 10.10.0.10:50000 (via PVE SSH forward in 03b-deploy-cluster.sh)
+control_plane_tunnel_ports:
+  - 5802
 
-# Worker nodes (minimal for local)
-talos_worker_count: 2
-talos_worker_memory: 4096
-talos_worker_cores: 2
-talos_worker_disk: "30G"
-
-# Network configuration
-talos_network_cidr: "192.168.56.0/24"
-talos_vip: "192.168.56.200"
-talos_pod_cidr: "10.244.0.0/16"
-talos_service_cidr: "10.96.0.0/12"
-
-# VM IDs for Proxmox (300 range for local to avoid conflicts)
-talos_control_plane_vmid_start: 3000
-talos_worker_vmid_start: 3100
-
-# Storage
-talos_storage_pool: "storage-vms"
-
-# Tags
-talos_vm_tags: "talos,kubernetes,local,vagrant"
-
-# Terraform workspace
-terraform_workspace: "local"
+# Workers — 2 nodes for local dev
+worker_count: 2
+worker_ips:
+  - "10.10.0.20"
+  - "10.10.0.21"
+worker_vm_ids:
+  - 3100
+  - 3101
+worker_cores: 2
+worker_memory: 4096
+worker_disk_size: "10G"
+# Tunnels: localhost:5803 → 10.10.0.20:50000, localhost:5804 → 10.10.0.21:50000
+worker_tunnel_ports:
+  - 5803
+  - 5804

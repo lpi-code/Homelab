@@ -22,6 +22,7 @@ Vagrant.configure("2") do |config|
   config.vm.define "pve02" do |pve|
     # VM IP on homelab-local (must match deploy.sh DHCP host and host_vars ansible_host)
     PVE_IP = "192.168.56.149"
+    NETWORK_GW = (ENV["NETWORK_GW"])
     pve_ssh_ip = (ENV["VAGRANT_PROXMOX_IP"] || PVE_IP).to_s.strip
     pve_ssh_ip = PVE_IP if pve_ssh_ip.empty?
     # Force IP only: avoid getaddrinfo "Name or service not known" if hostname was passed
@@ -79,6 +80,7 @@ Vagrant.configure("2") do |config|
 
     # Show access info after boot
     pve.vm.provision "shell", name: "display-info", run: "always", inline: <<-SHELL
+      echo "nameserver 1.1.1.1" > /etc/resolv.conf
       echo ""
       echo "Proxmox VE: https://#{PVE_IP}:8006 (root / vagrantvagrant)"
       echo "SSH: vagrant ssh"

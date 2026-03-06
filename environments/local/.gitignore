@@ -1,0 +1,40 @@
+# Vagrant
+.vagrant/
+*.log
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform.tfvars
+
+# Kubeconfig and cluster outputs (contain private keys)
+kubeconfig
+kubeconfig.yaml
+talosconfig
+talos_client_configuration.yaml
+outputs/
+
+# SOPS decrypted files
+*.decrypted.*
+*-decrypted.*
+
+# Ansible
+*.retry
+ansible.log
+
+# Environment specific
+.env
+*.local
+
+# VS Code
+.vscode/
+
+# Backup files
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

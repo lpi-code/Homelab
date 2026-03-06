@@ -110,9 +110,9 @@ fi
 echo ""
 
 # Ensure libvirt network exists
-NETWORK_NAME="homelab-local"
-NETWORK_SUBNET="192.168.56.0/24"
-NETWORK_GW="192.168.56.1"
+export NETWORK_NAME="homelab-local"
+export NETWORK_SUBNET="192.168.56.0/24"
+export NETWORK_GW="192.168.56.1"
 
 # Ensure IPv4 forwarding is enabled on the host (required for VM internet via NAT)
 if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" != "1" ]; then

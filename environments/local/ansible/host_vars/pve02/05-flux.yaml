@@ -1,0 +1,7 @@
+---
+# FluxCD Configuration — Local Environment
+# Deploy key is stored in 99-secrets.sops.yaml (flux_git_deploy_key)
+# Branch is computed at runtime: env/<environment_name> (from group_vars)
+
+flux_git_repo_url: "ssh://git@github.com/OWNER/REPO.git"
+kube_api_tunnel_port: 5805

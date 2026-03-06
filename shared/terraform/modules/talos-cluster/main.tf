@@ -4,7 +4,7 @@
 locals {
   # Network configuration
   net_cidr_suffix = split("/", var.talos_network_cidr)[1]
-  
+
   # Generate cluster endpoint (direct to first control plane)
   cluster_endpoint = "https://${var.control_plane_ips[0]}:6443"
 }
@@ -28,19 +28,8 @@ module "network" {
   management_network_cidr = var.management_network_cidr
   management_gateway = var.management_gateway
 
-  # NAT gateway configuration
-  enable_nat_gateway = var.enable_nat_gateway
-  nat_gateway_vm_id = var.nat_gateway_vm_id
-  nat_gateway_management_ip = var.nat_gateway_management_ip
-  nat_gateway_cluster_ip = var.nat_gateway_cluster_ip
-  openwrt_version = var.openwrt_version
-  iso_pool = var.iso_pool
-
   # Firewall configuration
   enable_firewall = var.enable_firewall
-
-  # OpenWrt configuration
-  openwrt_template_file_id = var.openwrt_template_file_id
 }
 
 # Generate Talos machine secrets
@@ -90,9 +79,10 @@ module "control_plane" {
       use_static_ips = true
       node_ip = var.control_plane_ips[count.index]
       hostname = "${var.cluster_name}-cp-${count.index + 1}"
-      temp_ip = var.nat_gateway_cluster_ip
     })
   ]
+  talos_version      = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   # VM Resources
   vm_cores    = var.control_plane_cores
@@ -150,6 +140,8 @@ module "workers" {
       hostname = "${var.cluster_name}-worker-${count.index + 1}"
     })
   ]
+  talos_version      = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   # VM Resources
   vm_cores    = var.worker_cores
@@ -166,8 +158,8 @@ module "workers" {
 # Bootstrap the cluster
 resource "talos_machine_bootstrap" "cluster" {
   client_configuration = talos_machine_secrets.cluster.client_configuration
-  endpoint                 = "dev-talos-cp-1:${var.control_plane_tunnel_ports[0]}"
-  node = "10.10.0.10"
+  endpoint             = "localhost:${var.control_plane_tunnel_ports[0]}"
+  node                 = var.control_plane_ips[0]
   depends_on = [
     module.control_plane,
     module.workers,
@@ -189,10 +181,10 @@ data "talos_client_configuration" "cluster" {
   ]
 }
 
-data "talos_cluster_kubeconfig" "cluster" {
+resource "talos_cluster_kubeconfig" "cluster" {
   client_configuration = talos_machine_secrets.cluster.client_configuration
-  node = "10.10.0.10"
-  endpoint = "dev-talos-cp-1:${var.control_plane_tunnel_ports[0]}"
+  node                 = var.control_plane_ips[0]
+  endpoint             = "localhost:${var.control_plane_tunnel_ports[0]}"
 
   depends_on = [
     talos_machine_bootstrap.cluster,

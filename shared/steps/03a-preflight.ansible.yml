@@ -1,0 +1,199 @@
+---
+# STEP: 03a
+# TITLE: Preflight checks for cluster deployment
+# DESCRIPTION: Verifies PVE storage pools and required VM templates exist before running OpenTofu.
+# TOOL: ansible
+# REQUIRES: 02a
+- name: Preflight checks for Talos cluster deployment
+  hosts: pve
+  become: yes
+  gather_facts: no
+
+  vars:
+    talos_image_file_id: "{{ proxmox_default_iso_pool }}:import/talos.qcow2"
+
+  tasks:
+    # --- Bridge vmbr1 (dedicated Talos network) ---
+    # Done first: VMs can't start without the bridge, regardless of template status.
+    # Created here rather than in Terraform because PVE's network reload returns
+    # warnings on Vagrant-based setups, which the bpg/proxmox provider treats as errors.
+    - name: Check if vmbr1 bridge exists
+      ansible.builtin.command: ip link show vmbr1
+      register: vmbr1_check
+      changed_when: false
+      failed_when: false
+
+    - name: Configure vmbr1 bridge in /etc/network/interfaces
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        block: |
+          auto vmbr1
+          iface vmbr1 inet static
+              address 10.10.0.1/24
+              bridge_ports none
+              bridge_stp off
+              bridge_fd 0
+              # Enable IP forwarding and NAT masquerade for cluster internet access
+              post-up echo 1 > /proc/sys/net/ipv4/ip_forward
+              post-up iptables -t nat -A POSTROUTING -s 10.10.0.0/24 -o vmbr0 -j MASQUERADE
+              post-down iptables -t nat -D POSTROUTING -s 10.10.0.0/24 -o vmbr0 -j MASQUERADE
+              # Pod isolation — block pods from reaching management network and host
+              post-up iptables -I FORWARD -s 10.244.0.0/16 -d {{ management_network_cidr }} -j DROP
+              post-up iptables -I FORWARD -s 10.244.0.0/16 -d 10.10.0.1/32 -j DROP
+              # Block pods from reaching Talos API on cluster nodes
+              post-up iptables -I FORWARD -s 10.244.0.0/16 -p tcp --dport 50000 -j DROP
+              # Block pods from reaching Kubernetes API directly (should use in-cluster service)
+              post-up iptables -I FORWARD -s 10.244.0.0/16 -p tcp --dport 6443 -d 10.10.0.0/24 -j DROP
+              # Cleanup on bridge down
+              post-down iptables -D FORWARD -s 10.244.0.0/16 -d {{ management_network_cidr }} -j DROP 2>/dev/null || true
+              post-down iptables -D FORWARD -s 10.244.0.0/16 -d 10.10.0.1/32 -j DROP 2>/dev/null || true
+              post-down iptables -D FORWARD -s 10.244.0.0/16 -p tcp --dport 50000 -j DROP 2>/dev/null || true
+              post-down iptables -D FORWARD -s 10.244.0.0/16 -p tcp --dport 6443 -d 10.10.0.0/24 -j DROP 2>/dev/null || true
+        marker: "# {mark} ANSIBLE MANAGED - talos cluster bridge vmbr1"
+        create: true
+      register: vmbr1_config
+      when: vmbr1_check.rc != 0
+
+    - name: Bring up vmbr1
+      ansible.builtin.shell: ifreload -a
+      args:
+        executable: /bin/bash
+      when: vmbr1_config.changed | default(false)
+      # ifreload may emit warnings about vmbr0 on Vagrant setups — that's OK
+      ignore_errors: true
+
+    - name: Verify vmbr1 is up
+      ansible.builtin.command: ip link show vmbr1
+      changed_when: false
+
+    # --- Bridge vmbr0 (Proxmox management bridge) ---
+    # Standard Proxmox pattern: vmbr0 bridges the physical management NIC and takes over
+    # its IP.
+    #
+    # The management NIC is detected dynamically by finding which interface holds
+    # ansible_host's IP — no hardcoded interface names.
+    - name: Detect management NIC (interface holding ansible_host IP)
+      ansible.builtin.shell: |
+        ip -o addr show | awk -v ip="{{ ansible_host }}" '$4 ~ ("^" ip "/") {print $2; exit}'
+      register: mgmt_nic_result
+      changed_when: false
+      failed_when: mgmt_nic_result.stdout | trim | length == 0
+
+    - name: Detect management NIC address and prefix
+      ansible.builtin.shell: |
+        ip -o addr show dev {{ mgmt_nic_result.stdout | trim }} | awk '$3=="inet" {print $4; exit}'
+      register: mgmt_addr_result
+      changed_when: false
+      failed_when: mgmt_addr_result.stdout | trim | length == 0
+
+    - name: Set management NIC facts
+      ansible.builtin.set_fact:
+        mgmt_nic: "{{ mgmt_nic_result.stdout | trim }}"
+        mgmt_addr: "{{ mgmt_addr_result.stdout | trim }}"
+
+    - name: Check if vmbr0 already bridges the management NIC
+      ansible.builtin.shell: |
+        ip link show {{ mgmt_nic }} | grep -q "master vmbr0"
+      register: vmbr0_ok
+      changed_when: false
+      failed_when: false
+
+    - name: Configure management NIC as manual (bridge port — IP moves to vmbr0)
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        block: |
+          auto {{ mgmt_nic }}
+          iface {{ mgmt_nic }} inet manual
+        marker: "# {mark} ANSIBLE MANAGED - {{ mgmt_nic }} manual for vmbr0"
+        create: true
+      register: mgmt_nic_config
+      when: vmbr0_ok.rc != 0
+
+    - name: Configure vmbr0 to bridge management NIC and hold its IP
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        block: |
+          auto vmbr0
+          iface vmbr0 inet static
+              address {{ mgmt_addr }}
+              gateway {{ management_gateway }}
+              bridge-ports {{ mgmt_nic }}
+              bridge-stp off
+              bridge-fd 0
+        marker: "# {mark} ANSIBLE MANAGED - vmbr0 management bridge"
+        create: true
+      register: vmbr0_config
+      when: vmbr0_ok.rc != 0
+
+    - name: Apply vmbr0 configuration (ifreload handles IP migration gracefully)
+      ansible.builtin.shell: ifreload -a
+      args:
+        executable: /bin/bash
+      when: (mgmt_nic_config.changed | default(false)) or (vmbr0_config.changed | default(false))
+      # Brief connectivity drop is expected as IP migrates from NIC to bridge.
+      # SSH reconnects automatically once vmbr0 is up with the same IP.
+      ignore_errors: true
+
+    - name: Verify vmbr0 is up with correct IP
+      ansible.builtin.shell: ip addr show vmbr0 | grep -q "{{ ansible_host }}"
+      changed_when: false
+      retries: 5
+      delay: 3
+      register: vmbr0_verify
+      until: vmbr0_verify.rc == 0
+
+    # --- Storage pools ---
+    - name: Check storage pools
+      command: pvesm status
+      register: storage_status
+      changed_when: false
+
+    - name: Extract available storage pool names
+      set_fact:
+        available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify VM storage pool is available
+      fail:
+        msg: "Storage pool '{{ proxmox_default_storage_pool }}' not found. Available: {{ available_storage_pools }}"
+      when: proxmox_default_storage_pool is not defined or proxmox_default_storage_pool not in available_storage_pools
+
+    - name: Verify ISO storage pool is available
+      fail:
+        msg: "ISO storage pool '{{ proxmox_default_iso_pool }}' not found. Available: {{ available_storage_pools }}"
+      when: proxmox_default_iso_pool is not defined or proxmox_default_iso_pool not in available_storage_pools
+
+    # --- Talos image ---
+    - name: Get storage-isos path from Proxmox
+      ansible.builtin.shell: |
+        awk '
+        /^(dir|lvm|zfspool):[ \t]*{{ proxmox_default_iso_pool }}([ \t]|$)/ {
+          if (match($0, /path[ \t]+[^ \t]+/)) { print substr($0, RSTART+length("path")+1, RLENGTH-length("path")-1); done=1; exit 0 }
+          found=1; next
+        }
+        found && /^[ \t]*path[ \t]/ { print $2; done=1; exit 0 }
+        found && /^[a-z]/ { found=0 }
+        END { if (!done) exit 1 }
+        ' /etc/pve/storage.cfg
+      register: storage_iso_path_result
+      changed_when: false
+      failed_when: storage_iso_path_result.rc != 0 or (storage_iso_path_result.stdout | trim | length) == 0
+
+    - name: Check Talos qcow2 image exists
+      stat:
+        path: "{{ storage_iso_path_result.stdout | trim }}/import/talos.qcow2"
+      register: talos_image_stat
+
+    - name: Fail if Talos image is missing
+      fail:
+        msg: >
+          Talos qcow2 image not found at {{ storage_iso_path_result.stdout | trim }}/import/talos.qcow2.
+          Run step 02a-prepare-templates.ansible.yml first.
+      when: not talos_image_stat.stat.exists
+
+    - name: Preflight passed
+      debug:
+        msg:
+          - "vmbr1 bridge: OK (masquerade + pod isolation configured)"
+          - "Storage pools: OK ({{ available_storage_pools | join(', ') }})"
+          - "Talos image: OK"
+          - "Ready to deploy cluster — run 03b-deploy-cluster.sh"

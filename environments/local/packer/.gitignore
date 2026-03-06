@@ -1,0 +1,11 @@
+# Packer build artifacts
+output-*/
+packer_cache/
+crash.log
+*.log
+packer-build.log
+
+# Templates are version controlled but large
+# Uncomment if you don't want to track templates
+# templates/*.qcow2
+templates/*.box

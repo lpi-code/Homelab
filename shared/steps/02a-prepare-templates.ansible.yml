@@ -1,0 +1,135 @@
+---
+# STEP: 02a
+# TITLE: Prepare VM template assets on PVE
+# DESCRIPTION: Downloads Talos qcow2 image onto PVE storage and ensures the VM bridge exists.
+# TOOL: ansible
+- name: Prepare VM Template Assets
+  hosts: pve
+  become: yes
+  gather_facts: no
+  collections:
+    - community.general
+  vars:
+    talos_version_default: "1.11.1"
+
+  pre_tasks:
+    - name: Check if Proxmox storage pools exist
+      command: pvesm status
+      register: storage_status
+      changed_when: false
+
+    - name: Extract available storage pool names
+      set_fact:
+        available_storage_pools: "{{ storage_status.stdout_lines | map('regex_replace', '^([^\\s]+).*', '\\1') | list }}"
+
+    - name: Verify storage pool is available
+      fail:
+        msg: "Storage pool '{{ proxmox_default_storage_pool }}' not found. Available pools: {{ available_storage_pools }}"
+      when: proxmox_default_storage_pool is not defined or proxmox_default_storage_pool not in available_storage_pools
+
+    - name: Check if ISO storage pool exists
+      fail:
+        msg: "ISO storage pool 'storage-isos' not found. Available pools: {{ available_storage_pools }}"
+      when: '"storage-isos" not in available_storage_pools'
+
+    - name: Get storage-isos path from Proxmox
+      ansible.builtin.shell: |
+        awk '
+        /^(dir|lvm|zfspool):[ \t]*{{ proxmox_default_iso_pool }}([ \t]|$)/ {
+          if (match($0, /path[ \t]+[^ \t]+/)) { print substr($0, RSTART+length("path")+1, RLENGTH-length("path")-1); done=1; exit 0 }
+          found=1; next
+        }
+        found && /^[ \t]*path[ \t]/ { print $2; done=1; exit 0 }
+        found && /^[a-z]/ { found=0 }
+        END { if (!done) exit 1 }
+        ' /etc/pve/storage.cfg
+      register: storage_iso_path_result
+      changed_when: false
+      failed_when: storage_iso_path_result.rc != 0 or (storage_iso_path_result.stdout | trim | length) == 0
+
+    - name: Set storage ISO path
+      ansible.builtin.set_fact:
+        storage_iso_path: "{{ storage_iso_path_result.stdout | trim }}"
+
+    - name: Create import directory on storage-isos
+      file:
+        path: "{{ storage_iso_path }}/import"
+        state: directory
+        mode: '0755'
+
+    - name: Check if VM bridge exists
+      ansible.builtin.command: ip link show "{{ vm_network | default('vmbr0') }}"
+      register: vm_bridge_check
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure VM bridge exists
+      block:
+        - name: Add VM bridge stanza to network interfaces
+          ansible.builtin.blockinfile:
+            path: /etc/network/interfaces
+            block: |
+              # Bridge for VMs (managed by prepare-templates step)
+              auto {{ vm_network | default('vmbr0') }}
+              iface {{ vm_network | default('vmbr0') }} inet manual
+                  bridge_ports none
+                  bridge_stp off
+                  bridge_fd 0
+            marker: "# {mark} ANSIBLE MANAGED - vm bridge for VMs"
+            create: true
+
+        - name: Bring up VM bridge
+          ansible.builtin.shell: "ifup {{ vm_network | default('vmbr0') }}"
+          args:
+            executable: /bin/bash
+      when: vm_bridge_check.rc != 0
+
+  tasks:
+    # --- Talos image (downloaded from Image Factory onto PVE) ---
+    - name: Generate Talos image schematic via Image Factory
+      uri:
+        url: "https://factory.talos.dev/schematics"
+        method: POST
+        body_format: json
+        body:
+          customization:
+            systemExtensions:
+              officialExtensions:
+                - "siderolabs/intel-ucode"
+                - "siderolabs/qemu-guest-agent"
+        status_code: [200, 201]
+      register: talos_config_response
+      delegate_to: localhost
+      become: no
+
+    - name: Set Talos image URL
+      set_fact:
+        talos_image_url: "https://factory.talos.dev/image/{{ talos_config_response.json.id }}/{{ talos_version | default(talos_version_default) }}/nocloud-amd64.qcow2"
+
+    - name: Download Talos qcow2 image onto PVE
+      get_url:
+        url: "{{ talos_image_url }}"
+        dest: "{{ storage_iso_path }}/import/talos.qcow2"
+        mode: '0444'
+        timeout: 600
+      register: talos_download_result
+
+  post_tasks:
+    - name: Write outputs for next steps
+      ansible.builtin.copy:
+        content: |
+          {
+            "pve_host": "{{ ansible_host }}",
+            "storage_iso_path": "{{ storage_iso_path }}",
+            "talos_image_path": "{{ storage_iso_path }}/import/talos.qcow2"
+          }
+        dest: "{{ lookup('env', 'OUTPUTS_DIR') }}/02a-templates.json"
+        mode: '0644'
+      delegate_to: localhost
+      become: no
+
+    - name: Summary
+      debug:
+        msg:
+          - "Talos qcow2 downloaded: {{ talos_download_result is succeeded }}"
+          - "Next step: run 03a-preflight.ansible.yml"

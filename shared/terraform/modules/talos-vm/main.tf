@@ -100,11 +100,13 @@ resource "proxmox_virtual_environment_vm" "talos_vm" {
 
 # Generate Talos machine configuration
 data "talos_machine_configuration" "config" {
-  cluster_name     = var.cluster_name
-  cluster_endpoint = var.cluster_endpoint
-  machine_type     = var.node_type
-  machine_secrets  = var.machine_secrets
-  config_patches = var.config_patches
+  cluster_name        = var.cluster_name
+  cluster_endpoint    = var.cluster_endpoint
+  machine_type        = var.node_type
+  machine_secrets     = var.machine_secrets
+  config_patches      = var.config_patches
+  talos_version       = var.talos_version != null ? "v${var.talos_version}" : null
+  kubernetes_version  = var.kubernetes_version
 }
 
 # Apply Talos configuration to the VM

@@ -1,0 +1,31 @@
+[global]
+keyboard = "fr"
+country = "fr"
+fqdn = "pve02.homelab.local"
+mailto = "admin@homelab.local"
+timezone = "Europe/Paris"
+root-password = "vagrantvagrant"  # Default password for local dev, change after first boot
+root-ssh-keys = []
+reboot-on-error = false
+reboot-mode = "reboot"
+
+[network]
+source = "from-dhcp"
+[disk-setup]
+filesystem = "zfs"
+zfs.raid = "raid0"
+zfs.hdsize = 220
+zfs.ashift = 12
+zfs.arc-max = 1024
+zfs.checksum = "on"
+zfs.compress = "lz4"
+zfs.copies = 1
+# For Vagrant, use vda instead of physical disk
+disk-list = ["vda"]
+# filter.ID_MODEL = "QEMU_HARDDISK"
+# filter-match = "any"
+
+# [first-boot]
+# source = "from-iso"
+# ordering = "fully-up"
+# Note: First-boot provisioning handled by Ansible

@@ -113,18 +113,16 @@ def convert_ansible_to_terraform_vars(ansible_vars):
         'talos_network_gateway': 'talos_network_gateway',
         'management_network_cidr': 'management_network_cidr',
         'management_gateway': 'management_gateway',
-        'enable_nat_gateway': 'enable_nat_gateway',
-        'nat_gateway_vm_id': 'nat_gateway_vm_id',
-        'nat_gateway_management_ip': 'nat_gateway_management_ip',
-        'nat_gateway_cluster_ip': 'nat_gateway_cluster_ip',
-        'openwrt_version': 'openwrt_version',
+        'control_plane_tunnel_ports': 'control_plane_tunnel_ports',
+        'worker_tunnel_ports': 'worker_tunnel_ports',
+        'talos_storage_pool': 'talos_storage_pool',
+        'proxmox_node': 'proxmox_node',
         'enable_firewall': 'enable_firewall',
         'ssh_public_keys': 'ssh_public_keys',
         'iso_pool': 'iso_pool',
         'proxmox_default_iso_pool': 'proxmox_default_iso_pool',
         'proxmox_user': 'proxmox_user',
         'proxmox_password': 'proxmox_password',
-        'openwrt_template_file_id': 'openwrt_template_file_id',
         'talos_image_file_id': 'talos_image_file_id',
     }
     
@@ -151,21 +149,17 @@ def convert_ansible_to_terraform_vars(ansible_vars):
         tf_vars['management_network_cidr'] = '192.168.0.0/24'
     if 'management_gateway' not in tf_vars:
         tf_vars['management_gateway'] = '192.168.0.1'
-    if 'enable_nat_gateway' not in tf_vars:
-        tf_vars['enable_nat_gateway'] = True
-    if 'nat_gateway_vm_id' not in tf_vars:
-        tf_vars['nat_gateway_vm_id'] = 200
-    if 'nat_gateway_management_ip' not in tf_vars:
-        tf_vars['nat_gateway_management_ip'] = '192.168.0.150/24'
-    if 'nat_gateway_cluster_ip' not in tf_vars:
-        tf_vars['nat_gateway_cluster_ip'] = '10.10.0.200/24'
-    if 'openwrt_version' not in tf_vars:
-        tf_vars['openwrt_version'] = '23.05.5'
+    if 'talos_storage_pool' not in tf_vars:
+        tf_vars['talos_storage_pool'] = 'local-zfs'
+    if 'control_plane_tunnel_ports' not in tf_vars:
+        tf_vars['control_plane_tunnel_ports'] = [5802]
+    if 'worker_tunnel_ports' not in tf_vars:
+        tf_vars['worker_tunnel_ports'] = [5803, 5804]
     if 'enable_firewall' not in tf_vars:
         tf_vars['enable_firewall'] = True
     if 'ssh_public_keys' not in tf_vars:
         tf_vars['ssh_public_keys'] = []
-    
+
     return tf_vars
 
 
@@ -246,7 +240,10 @@ def main():
             # Called by Terraform external data source - convert all values to strings
             string_vars = {}
             for key, value in terraform_vars.items():
-                if isinstance(value, (list, dict)):
+                if isinstance(value, bool):
+                    # tobool() in OpenTofu requires lowercase "true"/"false"
+                    string_vars[key] = str(value).lower()
+                elif isinstance(value, (list, dict)):
                     string_vars[key] = json.dumps(value)
                 else:
                     string_vars[key] = str(value)

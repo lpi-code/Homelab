@@ -154,6 +154,18 @@ variable "config_patches" {
   default     = []
 }
 
+variable "talos_version" {
+  description = "Talos version string (e.g. '1.11.1') — passed to data.talos_machine_configuration to pin config schema"
+  type        = string
+  default     = null
+}
+
+variable "kubernetes_version" {
+  description = "Kubernetes version — must be compatible with talos_version"
+  type        = string
+  default     = null
+}
+
 # VM Behavior
 variable "start_vm" {
   description = "Whether to start the VM after creation"

@@ -1,0 +1,10 @@
+# Example Terraform variables for local environment
+# Copy to terraform.tfvars and update with your values
+
+# Proxmox configuration
+proxmox_host        = "192.168.56.149"
+proxmox_api_url     = "https://192.168.56.149:8006/api2/json"
+proxmox_user        = "automation"
+proxmox_password    = "CHANGE_ME"  # Or use data source from Ansible
+
+environment = "local"

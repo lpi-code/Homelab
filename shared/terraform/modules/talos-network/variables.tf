@@ -47,7 +47,7 @@ variable "talos_network_cidr" {
 }
 
 variable "talos_network_gateway" {
-  description = "Gateway for the Talos cluster network"
+  description = "Gateway for the Talos cluster network (Proxmox bridge IP)"
   type        = string
 }
 
@@ -61,65 +61,9 @@ variable "management_gateway" {
   type        = string
 }
 
-# NAT Gateway Configuration
-variable "enable_nat_gateway" {
-  description = "Enable NAT gateway for Talos cluster internet access"
-  type        = bool
-  default     = true
-}
-
-variable "nat_gateway_vm_id" {
-  description = "VM ID for the NAT gateway"
-  type        = number
-  default     = 200
-}
-
-variable "nat_gateway_management_ip" {
-  description = "Management IP for the NAT gateway (WAN interface)"
-  type        = string
-}
-
-variable "nat_gateway_cluster_ip" {
-  description = "Cluster network IP for the NAT gateway (LAN interface)"
-  type        = string
-}
-
-variable "nat_gateway_password" {
-  description = "Root password for OpenWrt NAT gateway"
-  type        = string
-  default     = "openwrt"
-  sensitive   = true
-}
-
-variable "openwrt_version" {
-  description = "OpenWrt version to install"
-  type        = string
-  default     = "23.05.5"
-}
-
-variable "openwrt_template_file_id" {
-  description = "Template file ID for the OpenWrt LXC container"
-  type        = string
-  default     = "local:vztmpl/openwrt-template.tar.gz"
-}
-
-variable "iso_pool" {
-  description = "Storage pool for ISO images"
-  type        = string
-  default     = "local"
-}
-
-variable "talos_control_plane_ips" {
-  description = "List of control plane IP addresses for load balancing"
-  type        = list(string)
-  default     = []
-}
-
 # Firewall Configuration
 variable "enable_firewall" {
   description = "Enable firewall rules for Talos cluster network"
   type        = bool
   default     = true
 }
-
-

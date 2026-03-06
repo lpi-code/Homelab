@@ -1,5 +1,9 @@
 machine:
   type: controlplane
+  certSANs:
+    - 127.0.0.1
+    - localhost
+    - ${node_ip}
   network:
     hostname: ${hostname}
     interfaces:
@@ -17,38 +21,13 @@ machine:
       - 1.1.1.1
       - 8.8.8.8
   install:
-    disk: /dev/sda
-    image: ghcr.io/siderolabs/installer:${talos_version}
-  kubelet:
-    extraArgs:
-      {}
-  kernel:
-    modules:
-      - name: br_netfilter
-      - name: overlay
-  systemDiskEncryption:
-    state:
-      provider: luks2
-      keys:
-        - nodeID: {}
-      options:
-        - no_read_workqueue
-        - no_write_workqueue
-    ephemeral:
-      provider: luks2
-      keys:
-        - nodeID: {}
-      options:
-        - no_read_workqueue
-        - no_write_workqueue
+    disk: /dev/vda
+    image: ghcr.io/siderolabs/installer:v${talos_version}
   time:
     servers:
+      - ${gateway}
       - time.cloudflare.com
       - time.google.com
-  logging:
-    destinations:
-      - format: json_lines
-        endpoint: tcp://127.0.0.1:31009
 cluster:
   controlPlane:
     endpoint: ${cluster_endpoint}
@@ -59,28 +38,6 @@ cluster:
       - 10.244.0.0/16
     serviceSubnets:
       - 10.96.0.0/12
-  proxy:
-    disabled: false
   discovery:
     enabled: true
-  etcd:
-    extraArgs:
-      {}
-  apiServer:
-    certSANs:
-      - ${temp_ip}
-    extraArgs:
-      {}
-  controllerManager:
-    extraArgs:
-      {}
-  scheduler:
-    extraArgs:
-      {}
-  coreDNS:
-    disabled: false
-  inlineManifests: []
-  extraManifests: []
-  adminKubeconfig:
-    certLifetime: 24h0m0s
   allowSchedulingOnControlPlanes: false

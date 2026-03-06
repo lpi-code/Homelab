@@ -10,6 +10,7 @@ is_local: true
 dns_servers:
   - "1.1.1.1"
   - "8.8.8.8"
+dns_search_domain: "local"
 
 # NTP settings
 ntp_servers:
@@ -18,3 +19,8 @@ ntp_servers:
 
 # Default gateway (libvirt network)
 default_gateway: "192.168.56.1"
+
+
+terraform_dir: "{{ lookup('env', 'SHARED_DIR_PATH') }}/../environments/local/terraform"
+
+

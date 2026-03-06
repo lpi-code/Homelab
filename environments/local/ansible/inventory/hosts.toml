@@ -1,0 +1,17 @@
+# Local Development Environment Inventory
+# Vagrant-based Proxmox VE for local testing
+
+[all]
+pve02
+
+[pve]
+pve02
+
+[local]
+pve02
+
+[local_pve]
+pve02
+
+[local_talos]
+pve02

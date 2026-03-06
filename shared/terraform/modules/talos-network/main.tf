@@ -1,125 +1,72 @@
-# 🌐 Talos Network Infrastructure Module
-# Creates network infrastructure including bridges and firewall rules with NAT
-# Built with ❤️ for Kubernetes homelab infrastructure
+# Talos Network Infrastructure Module
+# Creates network infrastructure including firewall rules.
+# NAT is handled by Proxmox iptables masquerade on vmbr1 (configured by 03a-preflight).
 
-# 🔧 Local Variables & Network Configuration
+# Local Variables & Network Configuration
 locals {
-  # 🌐 Network configuration calculations
+  # Network configuration calculations
   bridge_ipv4_cidr = "${var.bridge_ipv4_address}/${split("/", var.talos_network_cidr)[1]}"
   netmask = cidrnetmask(var.talos_network_cidr)
   net_cidr_suffix = split("/", var.talos_network_cidr)[1]
 }
 
-# 🌉 Create Dedicated Bridge for Talos Cluster
-resource "proxmox_virtual_environment_network_linux_bridge" "talos_bridge" {
-  node_name = var.proxmox_node
-  name      = var.bridge_name
-  comment   = "🌐 Dedicated bridge for ${var.cluster_name} Talos cluster"
-
-  # 🌉 Bridge Configuration
-  # Note: bridge_ports and bridge_vlan_aware are not supported by the provider
-  
-  # 🔗 IP Configuration
-  address = var.bridge_ipv4_address
-  # Note: gateway removed - only one default gateway allowed per node (vmbr0 already has it)
-  
-  # ⚙️ Additional Settings
-  autostart = true
-
-  # 🔄 Lifecycle management for existing resources
-  lifecycle {
-    # Ignore changes to certain attributes that might differ from existing resources
-    ignore_changes = [
-      # Ignore comment changes as existing bridges might have different comments
-      comment,
-      # Ignore autostart changes as existing bridges might have different settings
-      autostart,
-    ]
-    
-    # Prevent accidental destruction
-    prevent_destroy = true
-    
-    # Create before destroy to handle existing resources
-    create_before_destroy = false
-  }
-}
-
-# 🌐 Create NAT Gateway using OpenWrt Router Module
-module "openwrt_router" {
-  count = var.enable_nat_gateway ? 1 : 0
-  source = "../openwrt-router"
-
-  # Basic Configuration
-  proxmox_node = var.proxmox_node
-  cluster_name = var.cluster_name
-  storage_pool = var.storage_pool
-
-  # Router Configuration
-  router_name = "${var.cluster_name}-openwrt"
-  router_vm_id = var.nat_gateway_vm_id
-  router_cpu_cores = 1
-  router_memory = 512
-  router_disk_size = "1"
-
-  # Network Configuration
-  management_bridge = "vmbr0"  # Management/WAN bridge
-  cluster_bridge = var.bridge_name
-  management_ip = var.nat_gateway_management_ip
-  cluster_ip = var.nat_gateway_cluster_ip
-  management_gateway = var.management_gateway
-
-  # Template Configuration
-  openwrt_template_file_id = var.openwrt_template_file_id
-
-  # VM Behavior
-  auto_start = true
-
-  depends_on = [
-    proxmox_virtual_environment_network_linux_bridge.talos_bridge,
-  ]
-}
+# Bridge vmbr1 is created by 03a-preflight.ansible.yml before Terraform runs.
+# Terraform only manages what runs ON the bridge (VMs, firewall), not the bridge itself.
 
 # Create firewall rules if enabled
 resource "proxmox_virtual_environment_firewall_rules" "talos_cluster" {
-  count = var.enable_firewall ? 0 : 1
-  
+  count = var.enable_firewall ? 1 : 0
+
   node_name = var.proxmox_node
 
-  # Allow Talos API access
+  # Allow Talos API access from management network only
   rule {
     type    = "in"
     action  = "ACCEPT"
-    comment = "Allow Talos API access"
+    comment = "Allow Talos API access from management network"
+    source  = var.management_network_cidr
     dest    = var.talos_network_cidr
     dport   = "50000"
     proto   = "tcp"
   }
 
-  # Allow Kubernetes API access
+  # Allow Kubernetes API access from management and cluster networks
   rule {
     type    = "in"
     action  = "ACCEPT"
-    comment = "Allow Kubernetes API access"
+    comment = "Allow Kubernetes API access from management network"
+    source  = var.management_network_cidr
     dest    = var.talos_network_cidr
     dport   = "6443"
     proto   = "tcp"
   }
 
-  # Allow etcd peer access (port 2379)
   rule {
     type    = "in"
     action  = "ACCEPT"
-    comment = "Allow etcd client access"
+    comment = "Allow Kubernetes API access within cluster"
+    source  = var.talos_network_cidr
+    dest    = var.talos_network_cidr
+    dport   = "6443"
+    proto   = "tcp"
+  }
+
+  # Allow etcd access within cluster only
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    comment = "Allow etcd client access within cluster"
+    source  = var.talos_network_cidr
     dest    = var.talos_network_cidr
     dport   = "2379"
     proto   = "tcp"
   }
 
-  # Allow etcd peer access (port 2380)
   rule {
     type    = "in"
     action  = "ACCEPT"
-    comment = "Allow etcd peer access"
+    comment = "Allow etcd peer access within cluster"
+    source  = var.talos_network_cidr
     dest    = var.talos_network_cidr
     dport   = "2380"
     proto   = "tcp"
@@ -145,19 +92,4 @@ resource "proxmox_virtual_environment_firewall_rules" "talos_cluster" {
     proto   = "udp"
   }
 
-  # Allow NAT gateway access
-  rule {
-    type    = "in"
-    action  = "ACCEPT"
-    comment = "Allow NAT gateway access"
-    source  = var.management_network_cidr
-    dest    = var.talos_network_cidr
-    proto   = "tcp"
-  }
-
-  depends_on = [
-    proxmox_virtual_environment_network_linux_bridge.talos_bridge
-  ]
 }
-
-
