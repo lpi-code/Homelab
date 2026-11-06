@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Explicit root: lists only Flux's own components and the two delegating
+# Kustomizations. Without this file kustomize-controller auto-generates a
+# recursive kustomization that would also apply apps/ and infrastructure/
+# directly, conflicting with the Kustomizations that manage them.
+resources:
+  - flux-system
+  - infrastructure.yaml
+  - apps.yaml

@@ -1,0 +1,43 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nfs-subdir-external-provisioner
+  namespace: nfs-provisioner
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: nfs-subdir-external-provisioner
+      version: "4.0.*"
+      sourceRef:
+        kind: HelmRepository
+        name: nfs-subdir-external-provisioner
+        namespace: nfs-provisioner
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    nfs:
+      # ---------------------------------------------------------------
+      # TODO: set these to the OpenMediaVault Raspberry Pi NAS.
+      #   server: the Pi's IP on the 10.30.0.0/24 cluster LAN
+      #   path:   the NFS export path configured in OMV
+      # Until both are correct, the nfs-client StorageClass cannot bind
+      # and the actual-data PVC will stay Pending.
+      # ---------------------------------------------------------------
+      server: 10.30.0.XXX   # TODO
+      path: /export/k8s     # TODO
+      mountOptions:
+        - nfsvers=4.1
+        - hard
+    storageClass:
+      create: true
+      name: nfs-client
+      defaultClass: true
+      # Keep data on the NAS if the PVC is deleted.
+      reclaimPolicy: Retain
+      archiveOnDelete: true
+      accessModes: ReadWriteOnce

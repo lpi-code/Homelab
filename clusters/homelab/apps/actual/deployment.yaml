@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: actual
+  namespace: actual
+  labels:
+    app: actual
+spec:
+  replicas: 1
+  # SQLite on a single RWO volume: never run two pods at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: actual
+  template:
+    metadata:
+      labels:
+        app: actual
+    spec:
+      securityContext:
+        # NOTE: the upstream actual-server image declares no USER, so it runs
+        # as root by default. We pin it to 1000:1000 instead.
+        #
+        # IMPORTANT (NFS): fsGroup is NOT applied to NFS volumes, so Kubernetes
+        # will not chown the share for us. The OpenMediaVault export must
+        # therefore already be writable by uid/gid 1000 -- either chown the
+        # export dir to 1000:1000 on the Pi, or map all users to 1000 in the
+        # OMV NFS export options. Otherwise the pod starts but fails to write
+        # its SQLite budget and crash-loops.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: actual
+          image: actualbudget/actual-server:26.11.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5006
+              protocol: TCP
+          env:
+            - name: ACTUAL_DATA_DIR
+              value: /data
+            - name: TZ
+              value: Europe/Paris
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: actual-data
