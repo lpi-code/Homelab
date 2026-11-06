@@ -9,7 +9,13 @@ spec:
   timeout: 5m
   path: ./clusters/homelab/infrastructure
   prune: true
-  wait: true
+  # Deliberately false: the nfs-subdir-external-provisioner cannot become
+  # healthy until the OMV NFS server/path placeholders in
+  # infrastructure/nfs-provisioner/helmrelease.yaml are filled in. With
+  # wait: true this Kustomization would never be Ready and would block the
+  # dependent 'apps' Kustomization, so Actual would never be created at all.
+  # Flip this to true once the NAS is live.
+  wait: false
   sourceRef:
     kind: GitRepository
     name: flux-system
